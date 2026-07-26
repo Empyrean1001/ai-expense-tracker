@@ -1,26 +1,19 @@
 # Expense Tracker — Design Spec
 
-Date: 2026-07-26
-
 ## Purpose
 
-A monthly workflow that turns a raw bank statement export into a categorized,
-insight-rich Excel dashboard. The user manually uploads one bank statement
-export per month (once the month's statement is fully available). The
-tool categorizes transactions, extracts vendors, tracks money lent/borrowed
-between the user and other people, and surfaces spending patterns — all with
-the user reviewing and confirming anything ambiguous rather than the LLM
-guessing silently.
+A monthly workflow that turns a raw bank statement export into a categorized, insight-rich Excel dashboard. The user manually uploads one bank statement export per month (once the month's statement is fully available). 
+The tool categorizes transactions, extracts vendors, tracks money lent/borrowed between the user and other people, and surfaces spending patterns — all with the user reviewing and confirming anything ambiguous rather than the LLM guessing silently.
 
-This is v1 of a tool intended to be extended over time; it is not limited to
-Excel output long-term, but Excel is the only output format for this phase.
+This is v1 of a tool intended to be extended over time; it is not limited to Excel output long-term, but Excel is the only output format for this phase.
 
 ## Architecture
 
-Standalone Python CLI application, run once a month, using flat files (no
-database) as persistent storage. Categorization runs against a **locally
-hosted LLM via Ollama** (not a cloud API) — all bank data stays on the
+Standalone Python CLI application, run once a month, using flat files as persistent storage. Categorization runs against a **locally
+hosted LLM via Ollama** — all bank data stays on the
 user's machine.
+
+Currently it is not designed to be able to detect the table of transactions, but built around an already existing csv format of the statement. However this can be extended to support other formats in the future. The table of transactions is detected by looking for the row that contains the string "Sl. No." which is a column that is present in the statement.
 
 ```
 bank_statement.csv → Parser → Categorization Agent (local Ollama model + vendor cache)
@@ -34,7 +27,7 @@ bank_statement.csv → Parser → Categorization Agent (local Ollama model + ven
 
 ### LLM runtime
 
-- Runs via [Ollama](https://ollama.com) on `http://localhost:11434` (configurable).
+- Runs via [Ollama](https://ollama.com) on local host.
 - Default model: **`qwen2.5:3b-instruct`** — lightweight, reliable structured
   (JSON) output, good fit for local categorization on modest hardware.
   Model name is a config value (`config.yaml`), so it can be swapped for
@@ -44,7 +37,7 @@ bank_statement.csv → Parser → Categorization Agent (local Ollama model + ven
   (`ollama pull qwen2.5:3b-instruct`) — it does not manage the Ollama
   installation itself.
 - Requests use Ollama's JSON-mode/structured output so responses parse
-  reliably into category/subcategory/vendor/confidence fields.
+  reliably into category/subcategory/vendor/confidence fields. Also utilized Pydantic to verify the final output structure.
 
 ### Persistent data files
 
@@ -85,15 +78,18 @@ Shopping:
   - Clothing
   - Electronics
   - Online (Amazon/Flipkart)
+  - Home
 Entertainment:
   - Streaming
   - Movies/Events
+  - Subscriptions
 Health:
   - Pharmacy
   - Doctor/Hospital
 Income:
   - Salary
   - Refunds
+  - Gifts
 Lend/Borrow:
   - (tracked separately in ledger.json, not a spending category)
 Other/Uncategorized:
@@ -102,18 +98,13 @@ Other/Uncategorized:
 
 ## Input format
 
-Validated against a real sample export (Kotak Mahindra Bank, `example doc/`).
-The file is a **CSV** (not `.xlsx`) with structure the parser must handle:
+Validated against a real sample export.
+The file is a **CSV** with structure the parser must handle:
 
-- **Header metadata block** (rows 1–13): account holder name, address,
-  account number, IFSC, period, currency, etc. Not tabular — must be
-  skipped.
+- **Header metadata block**: account holder name, address, account number, IFSC, period, currency, etc. Not tabular — must be skipped.
 - **Transaction table**: begins at the row whose first cells are exactly
   `Sl. No.`, `Transaction Date`, `Value Date`, `Description`,
-  `Chq /Ref No.`, `Amount`, `Dr / Cr`, `Balance`, `Dr / Cr` (column names
-  have irregular spacing around slashes — matched whitespace-normalized,
-  not by exact string). Two separate `Dr / Cr` columns exist: one qualifies
-  `Amount`, the other qualifies `Balance`.
+  `Chq /Ref No.`, `Amount`, `Dr / Cr`, `Balance`, `Dr / Cr`.
 - **Footer block**: a `Closing Balance` row followed by free-text notes.
   Must be skipped.
 - **`Transaction Date`** includes a timestamp (`31-03-2026 07:48:39`);
@@ -122,11 +113,9 @@ The file is a **CSV** (not `.xlsx`) with structure the parser must handle:
   `1,33,116.37`) — parser must strip grouping commas before converting to
   float, for both 2-comma and no-comma values.
 - **Description** for UPI transactions follows the pattern
-  `UPI/<NAME>/<UPI reference>/<short note>`, e.g.
-  `UPI/MANOJ KUMAR S /700000000101/auto`. The trailing note (`bus`, `bike`,
+  `UPI/<NAME>/<UPI reference>/<short note>`. The trailing note (`bus`, `bike`,
   `auto`, etc.) is a short user-entered remark from when the payment was
-  made, and is a useful categorization signal — see P2P Transfer Detector
-  below for why it matters more than it first appears.
+  made, and is a useful categorization signal.
 - Non-UPI rows exist too (e.g. `Int.Pd:<account>:<period>` for interest
   credited) with an empty `Chq /Ref No.`.
 
@@ -149,7 +138,7 @@ scope for v1.
    confidence score. Updates the vendor cache with new mappings. For UPI
    transactions paid to an individual name, the trailing description note
    (e.g. `/auto`, `/bus`, `/bike`) is passed to the LLM as context — this is
-   what lets `UPI/MANOJ KUMAR S/700000000101/auto` be confidently
+   what lets `UPI/<name>/<transaction id>/auto` be confidently
    categorized as Transport rather than treated as an unexplained transfer
    to a person.
 
