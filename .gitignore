@@ -1,0 +1,8 @@
+example doc/
+data/
+output/
+statements/
+*.csv
+.env
+__pycache__/
+*.pyc
