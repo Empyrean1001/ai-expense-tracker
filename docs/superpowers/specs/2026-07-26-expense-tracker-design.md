@@ -3,7 +3,9 @@
 ## Purpose
 
 A monthly workflow that turns a raw bank statement export into a categorized, insight-rich Excel dashboard. The user manually uploads one bank statement export per month (once the month's statement is fully available). 
-The tool categorizes transactions, extracts vendors, tracks money lent/borrowed between the user and other people, and surfaces spending patterns — all with the user reviewing and confirming anything ambiguous rather than the LLM guessing silently.
+The tool categorizes transactions, extracts vendors, tracks money lent/borrowed between the user and other people (including partial amounts from split/group expenses), and surfaces spending patterns — all with the user reviewing and confirming anything ambiguous rather than the LLM guessing silently.
+
+Splits cannot be detected from a bank statement at all — the description of a merchant payment gives no signal that a bill was shared with others. So split tracking is a separate, on-demand, LLM-free mechanism (see **Split Tracker** below), not something the categorization pipeline attempts to infer.
 
 This is v1 of a tool intended to be extended over time; it is not limited to Excel output long-term, but Excel is the only output format for this phase.
 
@@ -20,9 +22,18 @@ bank_statement.csv → Parser → Categorization Agent (local Ollama model + ven
                              → P2P Transfer Detector (heuristic, refined by category confidence)
                              → Interactive terminal review (user confirms/flags)
                              → Append to data/transactions.csv (master log)
-                             → Update data/ledger.json (lend/borrow)
+                             → Update data/ledger.json (direct lend/borrow)
                              → Insights Engine (reads transactions.csv history)
                              → Excel Dashboard Generator → output/expense_dashboard_<month>.xlsx
+```
+
+Separately, run anytime (not part of the monthly pipeline above, and never
+touches the LLM):
+
+```
+python track_expenses.py split → search data/transactions.csv → pick a transaction
+                                → user enters split (equal or custom amounts)
+                                → Update data/ledger.json (split entries)
 ```
 
 ### LLM runtime
@@ -44,9 +55,17 @@ bank_statement.csv → Parser → Categorization Agent (local Ollama model + ven
 - **`data/transactions.csv`** — append-only master log of every categorized
   transaction ever processed. Columns: date, description, vendor, category,
   subcategory, amount, dr/cr, source statement/month, dedup hash.
-- **`data/ledger.json`** — lend/borrow entries: person, direction
-  (lent/borrowed), amount, date, status (settled/unsettled), linked
-  transaction reference.
+- **`data/ledger.json`** — lend/borrow entries, of two kinds:
+  - **Direct loan** — the whole transaction amount is a loan (e.g. sending
+    someone money directly via UPI): `{type: "direct", person, direction
+    (lent/borrowed), amount, date, status (settled/unsettled), linked
+    transaction hash}`.
+  - **Split** — you paid a merchant/vendor the full amount, and one or more
+    people owe back a portion of it: `{type: "split", linked transaction
+    hash, total_amount, splits: [{person, amount, status}], date}`. The
+    underlying transaction keeps its normal category and full amount (it's
+    a real expense) — the split entry only tracks what's owed back, it
+    does not reclassify the transaction.
 - **`data/vendor_cache.json`** — vendor → category/subcategory mapping
   learned over time, so previously-seen vendors are not re-sent to the LLM.
   Keeps categorization consistent across months and reduces API calls.
@@ -160,23 +179,86 @@ scope for v1.
    - Low-confidence categorizations: user picks/overrides the
      category/subcategory.
 
-5. **Ledger Manager** — writes confirmed lend/borrow entries to
+5. **Ledger Manager** — writes confirmed direct lend/borrow entries to
    `ledger.json`. Also exposes a `settle` CLI command (e.g.
    `python track_expenses.py settle "Rahul Sharma"`) to mark a person's
-   outstanding balance as settled.
+   outstanding balance as settled — this works across both direct-loan and
+   split entries for that person.
 
-6. **Insights Engine** — reads the full `transactions.csv` history to
+6. **Split Tracker** — a separate on-demand command
+   (`python track_expenses.py split`), run whenever a group expense needs
+   recording, entirely independent of the monthly categorization run and
+   never involving the LLM:
+   - Prompts for a search term (date/vendor/amount) and lists matching
+     transactions already in `transactions.csv`.
+   - User picks the transaction, then either does an equal split (enter
+     number of people + names) or a custom split (enter each person's
+     owed amount individually, for uneven shares like "drinks cost more").
+   - Validates that the sum of split amounts is less than the transaction
+     total (the remainder is the user's own share, not a receivable).
+   - Writes a `split`-type entry to `ledger.json`, linked to the
+     transaction's dedup hash. The transaction itself is untouched — it
+     keeps its original category and full amount.
+
+7. **Insights Engine** — reads the full `transactions.csv` history to
    compute: month-over-month category spending deltas, top vendors by
    spend, recurring-charge detection (same vendor + similar amount
    repeating across months), and notable spending spikes.
 
-7. **Excel Dashboard Generator** — builds `output/expense_dashboard_<month>.xlsx`
-   with:
-   - Raw transactions sheet (that month's transactions)
-   - Category summary sheet (pivot-style breakdown + pie chart)
-   - Month-over-month trend sheet (line/bar chart using transaction history)
-   - Lend/Borrow ledger sheet (current outstanding + settled history)
-   - Insights sheet (recurring charges, top vendors, notable changes)
+8. **Excel Dashboard Generator** — builds `output/expense_dashboard_<month>.xlsx`
+   per the finalized workbook format below.
+
+## Excel Dashboard Format
+
+Six sheets, in this order:
+
+1. **Dashboard** (landing sheet, charts only, no raw data)
+   - Pie chart: this month's spend by category
+   - Line chart: total spend per month over time (full history so far)
+   - Bar chart: top 5 vendors by spend this month
+   - Summary box: total currently owed to you / owed by you
+
+2. **Transactions** (raw data for the month, as a native Excel Table for
+   sort/filter)
+   - Columns: `Date, Value Date, Description, Vendor, Category,
+     Subcategory, Amount, Dr/Cr, Balance, Flag` (Flag is blank, or
+     "Split"/"Lent"/"Borrowed" if the row is linked to a ledger entry)
+
+3. **Category Summary**
+   - Table: `Category, Subcategory, Total Amount, % of Month` (pandas
+     groupby, written as values)
+   - Pie chart: category-level split
+   - Horizontal bar chart: subcategory breakdown within top categories
+
+4. **Trends** (uses full transaction history across all months processed
+   so far, not just the current month)
+   - Table: months as rows, categories as columns, total spend as values
+     (a computed matrix — see pivot-table note below)
+   - Line chart: overall monthly spend trend
+   - Stacked bar chart: monthly spend broken down by category
+   - Bar chart: daily spend within the current month (within-month
+     pattern — early vs. late month spikes)
+
+5. **Lend & Borrow Ledger**
+   - Summary line: total currently owed to you / owed by you
+   - Table: `Person, Type (Direct/Split), Direction, Amount, Date, Status,
+     Linked Transaction`
+   - Horizontal bar chart: outstanding amount per person, colored by
+     direction
+
+6. **Insights**
+   - Table: top vendors by spend, recurring charges detected (vendor,
+     amount, frequency), month-over-month category deltas with
+     conditional-formatting arrows (green ↓ / red ↑)
+   - Small bar chart: top vendors
+
+**Pivot-table note:** all "pivot-style" tables (Category Summary, Trends
+matrix) are pandas-computed aggregates written as plain values in native
+Excel Tables, not literal interactive Excel PivotTable objects —
+openpyxl's support for writing real PivotTables is limited/fragile. Charts
+reference these computed ranges directly. Sortable/filterable Excel Tables
+and real native charts are still produced; the user can build their own
+manual PivotTable from the Transactions sheet later if desired.
 
 ## Data flow (one monthly run)
 
@@ -212,6 +294,12 @@ scope for v1.
   skipped, not double-counted.
 - Ambiguous/unparseable amount or date in a row → flagged and shown to the
   user rather than silently guessed or dropped.
+- Split search with no matching transactions, or an ambiguous match (many
+  results) → show the list and let the user narrow/reselect rather than
+  guessing which transaction they meant.
+- Split amounts entered that sum to more than (or equal to) the
+  transaction total → rejected with an explanation; the user's own share
+  must be greater than zero.
 
 ## Testing
 
@@ -224,6 +312,9 @@ scope for v1.
   dependency on Ollama actually running in the test suite.
 - End-to-end test: sample statement → full pipeline → assert the output
   workbook has the expected sheets and the ledger is updated correctly.
+- Split Tracker tested independently of the LLM pipeline: transaction
+  search/matching, equal vs. custom split math, and rejection of
+  over-total split amounts.
 
 ## Explicitly out of scope for v1
 
