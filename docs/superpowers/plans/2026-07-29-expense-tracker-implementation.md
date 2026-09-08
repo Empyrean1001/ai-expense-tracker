@@ -1,5 +1,7 @@
 # Expense Tracker Implementation Plan
 
+> **SUPERSEDED** by `2026-09-08-expense-tracker-v2-implementation.md`. Kept as the reference for module designs the v2 plan ports (vendor cache, p2p detector, review, ledger, split tracker, insights, dashboard).
+
 > **For agentic workers:** Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Python CLI that turns a monthly bank statement CSV into a categorized, insight-rich Excel dashboard, using a locally-hosted LLM (Ollama) for categorization and a user-driven ledger for lend/borrow and split tracking.
