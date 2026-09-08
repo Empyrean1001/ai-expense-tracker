@@ -1,0 +1,11 @@
+name: Germany
+hints: |
+  Regional context: Germany.
+  - EDEKA, REWE, Aldi, Lidl and Netto are supermarkets (Food & Dining / Groceries).
+  - Lieferando is food delivery (Food & Dining / Delivery).
+  - DB / Deutsche Bahn and local Verkehrsbetriebe are public transit
+    (Transport / Public Transit).
+  - "Lastschrift" means SEPA direct debit — usually a recurring bill or
+    subscription. "Dauerauftrag" is a standing order, often rent.
+  - "Gehalt" or "Lohn" credits are salary (Income / Salary).
+  - Telekom, Vodafone and O2 are telecom (Bills & Utilities / Internet/Phone).

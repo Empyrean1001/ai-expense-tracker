@@ -1,0 +1,17 @@
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen2.5:3b-instruct"
+
+review:
+  # Categorizations below this confidence get shown to you for confirmation.
+  confidence_threshold: 0.6
+
+defaults:
+  # Locale hint pack appended to categorization prompts (see locales/).
+  locale: "in"
+  # Used when a statement format carries no currency of its own (e.g. QIF).
+  currency: "INR"
+
+paths:
+  data_dir: "data"
+  output_dir: "output"

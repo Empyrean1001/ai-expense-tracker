@@ -3,6 +3,9 @@ data/
 output/
 statements/
 *.csv
+# Synthetic fixtures/goldens only — never real bank data.
+!tests/fixtures/*.csv
+!evals/**/*.csv
 .env
 __pycache__/
 *.pyc

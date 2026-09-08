@@ -1,0 +1,10 @@
+# Tier-0 categorization rules — these always win, before the cache or the LLM.
+# match: "exact" compares the whole vendor (case-insensitive);
+# match: "contains" looks for the pattern anywhere in vendor or description.
+#
+# Example:
+# - pattern: "EDEKA"
+#   match: contains
+#   category: "Food & Dining"
+#   subcategory: "Groceries"
+rules: []

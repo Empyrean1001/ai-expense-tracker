@@ -1,0 +1,11 @@
+name: United States
+hints: |
+  Regional context: United States.
+  - DoorDash, Uber Eats and Grubhub are food delivery (Food & Dining / Delivery).
+  - Uber and Lyft are ride-hailing (Transport / Ride-hailing).
+  - Venmo and Zelle descriptions are person-to-person transfers; the memo text,
+    if any, indicates the purpose.
+  - Amazon and Walmart.com are online marketplaces (Shopping / Online Marketplace).
+  - "ACH" and "DIRECT DEP" credits are usually salary (Income / Salary).
+  - Comcast/Xfinity, Verizon, AT&T and T-Mobile are telecom
+    (Bills & Utilities / Internet/Phone).

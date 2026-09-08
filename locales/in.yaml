@@ -1,0 +1,12 @@
+name: India
+hints: |
+  Regional context: India.
+  - Swiggy and Zomato are food delivery services (Food & Dining / Delivery).
+  - Ola, Uber and Rapido are ride-hailing (Transport / Ride-hailing).
+  - BMTC, KSRTC, DTC and IRCTC are public transit / rail (Transport / Public Transit).
+  - Amazon, Flipkart, Myntra and Meesho are online marketplaces (Shopping / Online Marketplace).
+  - "UPI/<NAME>/<reference>/<note>" descriptions are UPI payments; the trailing
+    note is typed by the payer and is the best clue to the purpose
+    ("auto", "bus" = Transport; "lunch" = Food & Dining).
+  - "Int.Pd" descriptions are bank interest credited (Income / Interest).
+  - Jio, Airtel, Vi and BSNL are telecom (Bills & Utilities / Internet/Phone).

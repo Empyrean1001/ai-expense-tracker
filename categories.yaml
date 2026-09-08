@@ -1,0 +1,34 @@
+# Locale-neutral taxonomy. Region-specific merchant knowledge belongs in
+# locales/<code>.yaml, never here. "Lend/Borrow" is deliberately absent —
+# it lives in data/ledger.json and is always a human decision.
+Food & Dining:
+  - Groceries
+  - Restaurants
+  - Delivery
+Transport:
+  - Fuel
+  - Ride-hailing
+  - Public Transit
+Bills & Utilities:
+  - Electricity
+  - Internet/Phone
+  - Rent
+Shopping:
+  - Clothing
+  - Electronics
+  - Online Marketplace
+  - Home
+Entertainment:
+  - Streaming
+  - Movies/Events
+  - Subscriptions
+Health:
+  - Pharmacy
+  - Doctor/Hospital
+Income:
+  - Salary
+  - Refunds
+  - Gifts
+  - Interest
+Other/Uncategorized:
+  - ""
