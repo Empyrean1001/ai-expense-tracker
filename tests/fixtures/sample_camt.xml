@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>STMT-2026-07</MsgId>
+      <CreDtTm>2026-08-01T00:00:00</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-2026-07-001</Id>
+      <Ntry>
+        <Amt Ccy="EUR">45.67</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-07-15</Dt></BookgDt>
+        <ValDt><Dt>2026-07-15</Dt></ValDt>
+        <AcctSvcrRef>REF20260715001</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>KARTENZAHLUNG EDEKA MUENCHEN</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">1500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-07-16</Dt></BookgDt>
+        <ValDt><Dt>2026-07-16</Dt></ValDt>
+        <AcctSvcrRef>REF20260716001</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>GEHALT ACME GMBH</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>
