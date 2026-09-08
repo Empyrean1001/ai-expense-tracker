@@ -75,8 +75,8 @@ Dependency order (drives task order): models → config/localeparse → detector
 
 **Produces:** `Transaction` (Decimal amount ≥ 0, `direction: Literal["debit","credit"]`, `currency: str`, `balance: Decimal|None`, plus v1 enrichment fields), `CategorizationResult` (v1), `BankProfile` (header_signature, footer_sentinels, column_map: dict[str,int], date_formats: list[str], decimal_separator: `"."|","`, amount_convention: `"dual_drcr"|"signed"|"separate"`, debit_marker, signed_debit_negative, currency, description_convention: `"upi"|"generic"`, bank_name), `Rule` (pattern, match: `"exact"|"contains"`, category, subcategory), v1 ledger models with Decimal. All Decimal fields serialize to str in JSON mode (field_serializer).
 
-- [ ] Tests: model construction, Decimal-from-string validation, BankProfile column_map completeness validator (per amount_convention), Decimal→str JSON round-trip.
-- [ ] Implement; `pytest -q` green; commit.
+- [x] Tests: model construction, Decimal-from-string validation, BankProfile column_map completeness validator (per amount_convention), Decimal→str JSON round-trip.
+- [x] Implement; `pytest -q` green; commit.
 
 ### Task 2: Locale parsing primitives
 
@@ -87,7 +87,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `parse_datetime_multi(raw: str, formats: list[str]) -> datetime` — first format that fits.
 - `disambiguate_date_order(raws: list[str], separator_agnostic=True) -> Literal["day_first","month_first","ambiguous"]` — proven if any first/second component >12.
 
-- [ ] Tests for each locale grouping, negatives, garbage, ambiguity proof cases; implement; commit.
+- [x] Tests for each locale grouping, negatives, garbage, ambiguity proof cases; implement; commit.
 
 ### Task 3: Format detector + standard-format parsers
 
@@ -98,7 +98,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `parse_ofx(path) -> list[Transaction]` (regex over STMTTRN; CURDEF currency; signed TRNAMT), `parse_qif(path, currency, date_formats) -> list[Transaction]`, `parse_mt940(path) -> list[Transaction]` (`:60F:` currency, `:61:` value date + D/C + comma-decimal amount, `:86:` description), `parse_camt053(path) -> list[Transaction]` (namespace-agnostic Ntry walk).
 - `extract_vendor_and_note(description: str, convention: str) -> tuple[str, str]` — `"upi"` splits `UPI/<name>/<ref>/<note>`; `"generic"` returns (cleaned description, "").
 
-- [ ] Fixture-driven tests per format (dates, Decimal amounts, direction, currency, dedup hash present); implement; commit.
+- [x] Fixture-driven tests per format (dates, Decimal amounts, direction, currency, dedup hash present); implement; commit.
 
 ### Task 4: BankProfile executor + validator
 
@@ -108,7 +108,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `normalize_cell(cell) -> str` (strip all whitespace, lowercase), `find_header_row(rows, signature) -> int | None`, `parse_rows_with_profile(rows: list[list[str]], profile: BankProfile) -> list[Transaction]` (skips pre-header, stops at footer sentinel/blank-key rows, applies localeparse per profile, value_date falls back to posted date, computes dedup hash and source_month from value_date).
 - `validate_profile(rows, profile) -> list[str]` — empty list = valid. Checks: all rows parse; dates within 2000-01-01..today+366d; **balance continuity** (`prev ± amount == balance`) holding in either row orientation when balance is mapped; direction sanity (signed convention yields both signs or matches marker).
 
-- [ ] Tests: kotak-style profile parses fixture exactly; eu-style (comma decimal, signed amounts, day-first) parses; validator catches wrong amount column, wrong decimal separator, swapped date order (via impossible dates or broken continuity); implement; commit.
+- [x] Tests: kotak-style profile parses fixture exactly; eu-style (comma decimal, signed amounts, day-first) parses; validator catches wrong amount column, wrong decimal separator, swapped date order (via impossible dates or broken continuity); implement; commit.
 
 ### Task 5: Profile store + Schema Mapping Agent
 
@@ -119,7 +119,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `build_inference_prompt(sample_rows) -> str`; `infer_profile(sample_rows, model, max_attempts=2) -> BankProfile` — model is `.with_structured_output(BankProfile)`-shaped; each failed validation feeds errors back into the retry prompt; raises `SchemaInferenceError` after attempts.
 - `interactive_column_mapping(rows, prompt_fn, echo_fn) -> BankProfile` — shows a numbered preview of the detected header row + first rows; user picks column indices, date order, decimal separator, amount convention, currency.
 
-- [ ] Tests: fingerprint stability, save/match round trip, infer_profile happy path with fake model, retry-then-fallback on invalid profile, interactive mapping with scripted prompt_fn; implement; commit.
+- [x] Tests: fingerprint stability, save/match round trip, infer_profile happy path with fake model, retry-then-fallback on invalid profile, interactive mapping with scripted prompt_fn; implement; commit.
 
 ### Task 6: Ingestion orchestrator
 
@@ -133,7 +133,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 
 `model_factory` is lazy so known-bank runs build no LLM client.
 
-- [ ] Tests: cached-profile path never calls model_factory (assert via raising factory); inference path caches then parses; fallback path; implement; commit.
+- [x] Tests: cached-profile path never calls model_factory (assert via raising factory); inference path caches then parses; fallback path; implement; commit.
 
 ### Task 7: Categorization cascade (tiers 0–2)
 
@@ -144,7 +144,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `cache_key_for(txn)` — v1: person-name keys include the payment note.
 - `categorize_transactions(txns, *, rules, vendor_cache, model, categories, hints_text) -> None` — tier order rules→cache→LLM; only LLM results enter the cache.
 
-- [ ] Tests: rule short-circuits cache and model; cache hit skips model; person/merchant cache keys; LLM fallback to Uncategorized after retry (fake failing model); implement; commit.
+- [x] Tests: rule short-circuits cache and model; cache hit skips model; person/merchant cache keys; LLM fallback to Uncategorized after retry (fake failing model); implement; commit.
 
 ### Task 8: Review with write-back + stores
 
@@ -155,7 +155,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `transactions_store.CSV_COLUMNS` gains `currency`; amounts/balances written as exact Decimal strings.
 - `ledger.py` / `split_tracker.py`: v1 logic, Decimal amounts, split validation strict-less-than total.
 
-- [ ] Tests: review scripted-prompt flow incl. correction write-back list; store round trip preserves amount strings exactly; ledger outstanding math; split equal/custom/over-total rejection; implement; commit.
+- [x] Tests: review scripted-prompt flow incl. correction write-back list; store round trip preserves amount strings exactly; ledger outstanding math; split equal/custom/over-total rejection; implement; commit.
 
 ### Task 9: Insights + per-currency dashboard
 
@@ -163,7 +163,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 
 **Produces:** v1 insights (top vendors, recurring charges, MoM deltas) operating on a df pre-filtered to one currency. `generate_dashboard(transactions_csv, ledger_path, output_path, current_month)` groups history by currency: single currency → v1's exact six sheets; multiple → six sheets per currency with ` <CCY>` suffix. All v1 guard rails (no empty tables/charts).
 
-- [ ] Tests: insights math on synthetic df; workbook opens, has expected sheets for 1- and 2-currency histories; implement; commit.
+- [x] Tests: insights math on synthetic df; workbook opens, has expected sheets for 1- and 2-currency histories; implement; commit.
 
 ### Task 10: Graph, CLI, doctor
 
@@ -174,7 +174,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 - `run_doctor(config) -> list[Check]` — deps importable, data dirs writable, Ollama reachable, model pulled; each failure prints its fix command; CLI `doctor` exits non-zero on failure.
 - CLI: `process <file> [--locale] [--currency]`, `split`, `settle <person>`, `doctor`. Only `track_expenses.py` constructs `ChatOllama`; preflight runs before the graph only when the run may need the LLM.
 
-- [ ] Tests: graph short-circuits on no-new-transactions; end-to-end fake run appends and generates workbook; implement; commit.
+- [x] Tests: graph short-circuits on no-new-transactions; end-to-end fake run appends and generates workbook; implement; commit.
 
 ### Task 11: Eval harness
 
@@ -182,7 +182,7 @@ Dependency order (drives task order): models → config/localeparse → detector
 
 **Produces:** `python -m evals.run_evals` — always runs deterministic checks (committed profiles reproduce expected parses; validator rejects corrupted variants); runs LLM schema-inference and categorization accuracy+calibration only when Ollama is reachable, else prints SKIPPED with reason. Non-zero exit on regression.
 
-- [ ] Implement, run deterministic portion green, commit.
+- [x] Implement, run deterministic portion green, commit.
 
 ## Self-review notes
 

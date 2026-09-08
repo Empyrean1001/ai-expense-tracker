@@ -1,0 +1,12 @@
+{
+  "bank_name": "Kotak-style",
+  "header_signature": ["Sl. No.", "Transaction Date", "Value Date", "Description", "Chq /Ref No.", "Amount", "Dr / Cr", "Balance", "Dr / Cr"],
+  "footer_sentinels": ["Closing Balance"],
+  "column_map": {"posted_at": 1, "value_date": 2, "description": 3, "reference": 4, "amount": 5, "dr_cr": 6, "balance": 7},
+  "date_formats": ["%d-%m-%Y %H:%M:%S", "%d-%m-%Y"],
+  "decimal_separator": ".",
+  "amount_convention": "dual_drcr",
+  "debit_marker": "DR",
+  "currency": "INR",
+  "description_convention": "upi"
+}

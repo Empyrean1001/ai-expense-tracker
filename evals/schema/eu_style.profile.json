@@ -1,0 +1,11 @@
+{
+  "bank_name": "EU-style",
+  "header_signature": ["Buchungstag", "Wertstellung", "Verwendungszweck", "Betrag", "Saldo"],
+  "footer_sentinels": [],
+  "column_map": {"posted_at": 0, "value_date": 1, "description": 2, "amount": 3, "balance": 4},
+  "date_formats": ["%d.%m.%Y"],
+  "decimal_separator": ",",
+  "amount_convention": "signed",
+  "currency": "EUR",
+  "description_convention": "generic"
+}

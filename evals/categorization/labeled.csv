@@ -1,0 +1,16 @@
+description,note,locale,expected_category
+UPI/SWIGGY/645700000001/dinner,dinner,in,Food & Dining
+UPI/SURESH NAIK LA/700000000102/bus,bus,in,Transport
+UPI/BMTC BUS KA01F2/700000000103/bus,bus,in,Transport
+UPI/ZOMATO/645700000002/lunch,lunch,in,Food & Dining
+Int.Pd:0000000001:01-05-2026 to 31-07-2026,,in,Income
+UPI/JIO RECHARGE/645700000003/recharge,recharge,in,Bills & Utilities
+STARBUCKS STORE 123 COFFEE,,us,Food & Dining
+UBER TRIP 8402,,us,Transport
+NETFLIX.COM SUBSCRIPTION,,us,Entertainment
+ACH DIRECT DEP ACME CORP PAYROLL,,us,Income
+CVS PHARMACY 1234,,us,Health
+KARTENZAHLUNG EDEKA MUENCHEN,,de,Food & Dining
+LASTSCHRIFT TELEKOM DEUTSCHLAND,,de,Bills & Utilities
+GEHALT ACME GMBH,,de,Income
+DB BAHN FAHRKARTE,,de,Transport

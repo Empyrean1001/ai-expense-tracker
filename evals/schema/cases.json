@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "tests/fixtures/kotak_style.csv",
+    "profile": "evals/schema/kotak_style.profile.json",
+    "expected": {"count": 4, "total_debit": "314.00", "total_credit": "1500.00", "currency": "INR"}
+  },
+  {
+    "fixture": "tests/fixtures/eu_style.csv",
+    "profile": "evals/schema/eu_style.profile.json",
+    "expected": {"count": 3, "total_debit": "85.62", "total_credit": "1500.00", "currency": "EUR"}
+  }
+]
