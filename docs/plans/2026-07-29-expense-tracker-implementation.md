@@ -2,8 +2,6 @@
 
 > **SUPERSEDED** by `2026-09-08-expense-tracker-v2-implementation.md`. Kept as the reference for module designs the v2 plan ports (vendor cache, p2p detector, review, ledger, split tracker, insights, dashboard).
 
-> **For agentic workers:** Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build a Python CLI that turns a monthly bank statement CSV into a categorized, insight-rich Excel dashboard, using a locally-hosted LLM (Ollama) for categorization and a user-driven ledger for lend/borrow and split tracking.
 
 **Architecture:** A `process` command runs the monthly pipeline, modeled as a **LangGraph `StateGraph`** (parse → categorize via local Ollama model → flag ambiguous items for interactive terminal review → append to a flat-file transaction log → generate an Excel workbook). Two standalone commands, `split` and `settle`, manage the lend/borrow ledger independently of the monthly run, never touch the LLM, and are plain CLI commands rather than graph nodes. All persistence is flat files (CSV/JSON/YAML) — no database.

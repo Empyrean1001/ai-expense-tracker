@@ -1,6 +1,6 @@
 # AI System Design Decisions — Expense Tracker
 
-A study document. Each entry records an architectural decision made while designing this system, the alternatives considered, and the **generalizable principle** behind it — the building blocks of how an AI engineer designs an LLM-powered product in 2026. Read alongside the v2 spec (`docs/superpowers/specs/2026-09-08-expense-tracker-v2-worldwide-design.md`).
+A study document. Each entry records an architectural decision made while designing this system, the alternatives considered, and the **generalizable principle** behind it — the building blocks of how an AI engineer designs an LLM-powered product in 2026. Read alongside the v2 spec (`docs/specs/2026-09-08-expense-tracker-v2-worldwide-design.md`).
 
 Format per decision: **Context → Options → Decision → Why → Principle**.
 

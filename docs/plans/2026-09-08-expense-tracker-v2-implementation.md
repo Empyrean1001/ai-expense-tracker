@@ -1,14 +1,12 @@
 # Expense Tracker v2 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build the v2 worldwide-ready expense tracker: universal bank-statement ingestion (LLM-inferred cached bank profiles + deterministic standard-format parsers), a tiered categorization cascade over a local Ollama LLM, human review with write-back learning, flat-file persistence, and a per-currency Excel dashboard.
 
 **Architecture:** Ingestion normalizes any supported statement file into canonical `Transaction` records (`Decimal` money, ISO dates, ISO 4217 currency). CSV/XLSX layouts are parsed by a declarative `BankProfile` that the LLM infers once per bank format and that deterministic code validates (balance continuity) and executes forever after (cached by header fingerprint). Standard formats (OFX/QIF/MT940/CAMT.053) never touch the LLM. Categorization runs a cascade: user rules → vendor cache → local LLM → human review, with corrections written back to the cache. The monthly pipeline is a thin LangGraph `StateGraph`; `split`/`settle`/`doctor` are plain CLI commands.
 
 **Tech Stack:** Python 3.11+, pydantic v2, pandas, openpyxl, PyYAML, click, httpx, langgraph, langchain-ollama, pytest.
 
-**Spec:** `docs/superpowers/specs/2026-09-08-expense-tracker-v2-worldwide-design.md` (v2) layered on `docs/superpowers/specs/2026-07-26-expense-tracker-design.md` (v1, still authoritative for ledger/split/review/dashboard behavior). This plan supersedes `2026-07-29-expense-tracker-implementation.md`.
+**Spec:** `docs/specs/2026-09-08-expense-tracker-v2-worldwide-design.md` (v2) layered on `docs/specs/2026-07-26-expense-tracker-design.md` (v1, still authoritative for ledger/split/review/dashboard behavior). This plan supersedes `2026-07-29-expense-tracker-implementation.md`.
 
 ## Global Constraints
 

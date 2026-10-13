@@ -2,7 +2,7 @@
 
 **Status:** Proposed (supersedes the v1 spec `2026-07-26-expense-tracker-design.md` for everything ingestion- and locale-related; v1's ledger, split tracker, review flow, and Excel dashboard carry forward unchanged unless stated).
 
-Companion document: [`docs/ai-system-design-decisions.md`](../../ai-system-design-decisions.md) records *why* each AI-architecture choice was made, as a study reference. This spec records *what* is being built.
+Companion document: [`docs/ai-system-design-decisions.md`](../ai-system-design-decisions.md) records *why* each AI-architecture choice was made, as a study reference. This spec records *what* is being built.
 
 ## Purpose
 
