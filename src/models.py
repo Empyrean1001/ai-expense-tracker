@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_serializer, model_validator
 
 UNCATEGORIZED = "Other/Uncategorized"
+# The one category that means money in. Every other category is spending.
+INCOME_CATEGORY = "Income"
 
 Direction = Literal["debit", "credit"]
 

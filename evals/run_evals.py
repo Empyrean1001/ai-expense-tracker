@@ -14,22 +14,21 @@ any regression.
 import csv
 import json
 import sys
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
 PROJECT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT))
 
+from src.categorizer import categorize_transactions  # noqa: E402
 from src.config_loader import load_categories, load_config, load_locale_hints  # noqa: E402
-from src.models import BankProfile, CategorizationResult  # noqa: E402
-from src.ollama_client import (  # noqa: E402
-    OllamaError,
-    build_prompt,
-    check_ollama_available,
-)
+from src.descriptions import extract_vendor_and_note  # noqa: E402
+from src.layout_detect import detect_profile  # noqa: E402
+from src.models import BankProfile, CategorizationResult, Transaction  # noqa: E402
+from src.ollama_client import OllamaError, check_ollama_available  # noqa: E402
 from src.profile import parse_rows_with_profile  # noqa: E402
 from src.profile_validator import validate_profile  # noqa: E402
-from src.layout_detect import detect_profile  # noqa: E402
 from src.schema_agent import HeaderLabels, SchemaInferenceError, infer_profile  # noqa: E402
 
 CONFIDENCE_THRESHOLD = 0.6
@@ -136,35 +135,51 @@ def eval_header_labelling() -> list[str]:
 
 
 def eval_categorization() -> tuple[list[str], str]:
+    """Runs each labeled transaction through the real cascade (notes parsed
+    from the description, direction and amount in the prompt, the
+    direction-consistency check applied) with an empty cache."""
     model = get_live_model(CategorizationResult)
     categories = load_categories(PROJECT / "categories.yaml")
-    rows = list(csv.DictReader(open(PROJECT / "evals/categorization/labeled.csv", encoding="utf-8")))
+    with open(PROJECT / "evals/categorization/labeled.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
 
-    correct = 0
-    high_confidence = 0
-    high_confidence_correct = 0
-    misses = []
+    correct = high_confidence = high_confidence_correct = sent_to_review = 0
+    notes = []
     for row in rows:
-        hints = load_locale_hints(PROJECT / "locales", row["locale"])
-        prompt = build_prompt(row["description"], row["note"], categories, hints)
-        result = model.invoke(prompt) or CategorizationResult()
-        hit = result.category == row["expected_category"]
+        vendor, note = extract_vendor_and_note(row["description"], "upi")
+        txn = Transaction(
+            posted_at=datetime(2026, 7, 15), value_date=date(2026, 7, 15),
+            description=row["description"], amount=Decimal(row["amount"]),
+            direction=row["direction"], currency=row["currency"],
+            vendor=vendor, description_note=note,
+        )
+        categorize_transactions(
+            [txn], rules=[], vendor_cache={}, model=model, categories=categories,
+            hints_text=load_locale_hints(PROJECT / "locales", row["locale"]),
+        )
+        hit = txn.category == row["expected_category"]
         correct += hit
-        if result.confidence >= CONFIDENCE_THRESHOLD:
+        if txn.confidence >= CONFIDENCE_THRESHOLD:
             high_confidence += 1
             high_confidence_correct += hit
+        elif not hit:
+            sent_to_review += 1
         if not hit:
-            misses.append(
-                f"  {row['description'][:50]!r}: expected {row['expected_category']}, "
-                f"got {result.category} (conf {result.confidence:.2f})"
+            notes.append(
+                f"  {row['description'][:48]!r} ({row['direction']}): expected "
+                f"{row['expected_category']}, got {txn.category} (conf {txn.confidence:.2f})"
             )
 
     accuracy = correct / len(rows)
     calibration = (high_confidence_correct / high_confidence) if high_confidence else 1.0
+    confidently_wrong = high_confidence - high_confidence_correct
     summary = (
-        f"accuracy {correct}/{len(rows)} = {accuracy:.0%}; "
-        f"calibration (of {high_confidence} high-confidence answers, correct): {calibration:.0%}"
+        f"accuracy {correct}/{len(rows)} = {accuracy:.0%}; calibration "
+        f"{high_confidence_correct}/{high_confidence} = {calibration:.0%}; "
+        f"confidently wrong {confidently_wrong}; sent to review {sent_to_review}"
     )
+    if notes:
+        summary += "\n" + "\n".join(notes)
     failures = []
     if accuracy < 0.7:
         failures.append(f"categorization accuracy {accuracy:.0%} below 70% floor")
@@ -172,7 +187,7 @@ def eval_categorization() -> tuple[list[str], str]:
         failures.append(
             f"calibration {calibration:.0%} below 80% — the review threshold is not trustworthy"
         )
-    return failures + misses if failures else [], summary
+    return failures, summary
 
 
 def main() -> int:

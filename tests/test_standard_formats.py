@@ -105,6 +105,42 @@ class TestDescriptions:
         assert vendor == "Int.Pd:0001:JULY"
         assert note == ""
 
+    @pytest.mark.parametrize("description,vendor,note", [
+        # Newer Kotak shape: a bank code sits between payee and reference.
+        ("UPI/RAVI KUMAR S/YESB/700000000005/auto", "RAVI KUMAR S", "auto"),
+        ("UPI/SWIGGY/ICIC/700000000008/lunch", "SWIGGY", "lunch"),
+        # Lowercase bank code.
+        ("UPI/RAZORPAY STORE/utib/700000000001/coffee", "RAZORPAY STORE", "coffee"),
+        # A 4-letter payee is not mistaken for a bank code...
+        ("UPI/BMTC/700000000103/bus", "BMTC", "bus"),
+        # ...but a bank code after a 4-letter payee still is.
+        ("UPI/JIOX/YESB/700000000004/recharge", "JIOX", "recharge"),
+        # Payee containing a slash.
+        ("UPI/STARBUCKS/S.COFFEE COD/ICIC/700000000002/latte", "STARBUCKS/S.COFFEE COD", "latte"),
+        # Reversals (refund credits) are UPI too.
+        ("REV-UPI/SWIGGY/700000000003/complaint", "SWIGGY", "complaint"),
+        # Kotak appends the value date to some notes.
+        ("UPI/IMRAN  KHA/SBIN/700000000005/cab(Value Date: 12-10-2026)", "IMRAN KHA", "cab"),
+        # No note at all.
+        ("UPI/SURESH NAIK LA/700000000102", "SURESH NAIK LA", ""),
+    ])
+    def test_upi_shapes(self, description, vendor, note):
+        assert extract_vendor_and_note(description, "upi") == (vendor, note)
+
+    @pytest.mark.parametrize("boilerplate", [
+        "UPI", "UPIIntent", "Payment for", "Pay via Razo", "PayviaRazorpay",
+        "You are paying", "Payment To U", "Pay to Bhara",
+    ])
+    def test_app_boilerplate_is_not_a_note(self, boilerplate):
+        """Text the payment app fills in says nothing about what the
+        payment was for; only what the payer typed counts as a note."""
+        _, note = extract_vendor_and_note(f"UPI/ZOMATO LIMITED/HDFC/700000000007/{boilerplate}", "upi")
+        assert note == ""
+
+    def test_informative_app_text_is_kept(self):
+        _, note = extract_vendor_and_note("UPI/BLINK COMMERCE/YESB/700000000007/Blinkit Paym", "upi")
+        assert note == "Blinkit Paym"
+
     def test_generic_convention(self):
         vendor, note = extract_vendor_and_note("  KARTENZAHLUNG EDEKA  ", "generic")
         assert vendor == "KARTENZAHLUNG EDEKA"

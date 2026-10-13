@@ -6,7 +6,7 @@ the model at most once."""
 import json
 from pathlib import Path
 
-from src.models import CategorizationResult
+from src.models import INCOME_CATEGORY, CategorizationResult
 
 
 def normalize_vendor_key(vendor: str) -> str:
@@ -18,7 +18,17 @@ def load_vendor_cache(path: Path) -> dict[str, CategorizationResult]:
         return {}
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
-    return {key: CategorizationResult(**value) for key, value in raw.items()}
+    cache = {}
+    for key, value in raw.items():
+        result = CategorizationResult(**value)
+        # Keys gained a direction prefix ("DEBIT|SWIGGY"). For an older,
+        # unprefixed entry the category says which way the money went:
+        # Income is money in, everything else money out.
+        if not key.startswith(("DEBIT|", "CREDIT|")):
+            direction = "CREDIT" if result.category == INCOME_CATEGORY else "DEBIT"
+            key = f"{direction}|{key}"
+        cache[key] = result
+    return cache
 
 
 def save_vendor_cache(path: Path, cache: dict[str, CategorizationResult]) -> None:

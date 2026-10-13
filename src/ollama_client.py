@@ -10,7 +10,7 @@ Nothing in src/ constructs it; track_expenses.py does and passes it down.
 
 import httpx
 
-from src.models import UNCATEGORIZED, CategorizationResult
+from src.models import INCOME_CATEGORY, UNCATEGORIZED, CategorizationResult
 
 
 class OllamaError(Exception):
@@ -40,7 +40,14 @@ def check_ollama_available(host: str, model_name: str) -> None:
         )
 
 
-def build_prompt(description: str, note: str, categories: dict, hints_text: str = "") -> str:
+def build_prompt(
+    description: str,
+    note: str,
+    categories: dict,
+    hints_text: str = "",
+    direction: str = "",
+    amount: str = "",
+) -> str:
     lines = []
     for category, subcategories in categories.items():
         subs = ", ".join(s for s in (subcategories or []) if s)
@@ -56,12 +63,20 @@ def build_prompt(description: str, note: str, categories: dict, hints_text: str 
         f"'{UNCATEGORIZED}' with a low confidence instead of guessing.\n\n"
         f"Categories:\n{taxonomy}\n"
     )
+    if direction:
+        prompt += (
+            f"Money going out of the account is never {INCOME_CATEGORY}. Money "
+            f"coming in belongs under {INCOME_CATEGORY} — a refund or reversal "
+            f"of a purchase is {INCOME_CATEGORY} / Refunds.\n"
+        )
     if hints_text:
         prompt += f"\n{hints_text.rstrip()}\n"
-    return prompt + (
-        f"\nTransaction description: {description}\n"
-        f"Payment note: {note or '(none)'}\n"
-    )
+    prompt += f"\nTransaction description: {description}\n"
+    if direction == "debit":
+        prompt += f"Money: OUT of the account (you paid {amount})\n"
+    elif direction == "credit":
+        prompt += f"Money: INTO the account (you received {amount})\n"
+    return prompt + f"Payment note: {note or '(none)'}\n"
 
 
 def categorize_via_llm(
@@ -70,12 +85,14 @@ def categorize_via_llm(
     categories: dict,
     model,
     hints_text: str = "",
+    direction: str = "",
+    amount: str = "",
     attempts: int = 2,
 ) -> CategorizationResult:
     """Categorize one transaction, degrading to 'needs review' rather than
     raising — a malformed response from a small model is worth one retry, not
     an aborted run."""
-    prompt = build_prompt(description, note, categories, hints_text)
+    prompt = build_prompt(description, note, categories, hints_text, direction, amount)
     for _ in range(attempts):
         try:
             result = model.invoke(prompt)

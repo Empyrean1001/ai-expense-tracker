@@ -117,8 +117,10 @@ All money math uses `Decimal`. `float` never touches an amount.
 Cheapest capable tier first; each tier only sees what the previous couldn't settle:
 
 - **Tier 0 — user rules** (`rules.yaml`, optional): exact/substring vendor patterns the user pins (`"EDEKA" → Groceries`). Deterministic, instant, always wins.
-- **Tier 1 — vendor cache**: v1's learned memory, unchanged, including the person-name+note compound cache key.
-- **Tier 2 — local LLM**: Ollama structured-output call, as v1, with the taxonomy and any locale hint pack in the prompt.
+- **Tier 1 — vendor cache**: v1's learned memory. Keys are direction-qualified (`DEBIT|SWIGGY` vs `CREDIT|SWIGGY`, so refunds don't reuse purchases), and person keys include the payment note. Older unprefixed keys are migrated by category on load.
+- **Tier 2 — local LLM**: Ollama structured-output call with the taxonomy, any locale hint pack, the payment note, and the transaction's direction and amount in the prompt.
+- **Direction check (after tiers 0–2):** Income ⇔ money in. An automatic answer that contradicts the direction becomes Uncategorized at confidence 0 (so it reaches review) and is never cached (decision D-16).
+- **Payment notes** are what the payer typed. UPI descriptions are parsed by anchoring on the 12-digit reference (`UPI/<payee>[/<bank code>]/<ref>/<note>`, plus `REV-UPI/…` reversals), and app boilerplate ("UPI", "Payment for", "Pay via …") is not treated as a note. The person-vs-business check that drives loan candidates recognizes company words, including names cut off by the export ("APOLLO PHARMAC").
 - **Tier 3 — human review**: low-confidence results and P2P candidates, exactly the v1 interactive review. User corrections are written back into the vendor cache (and optionally promoted to a rule), so every correction makes tier 1/0 smarter and the system asks less over time.
 
 ### 6. Taxonomy & locale packs

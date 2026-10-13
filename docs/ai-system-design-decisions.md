@@ -191,6 +191,26 @@ Three non-AI decisions that shape the AI system:
 
 ---
 
+## D-16: Give the model the facts you already have; check its answer against them
+
+**Context.** A real ₹106 auto-rickshaw fare came back as *Income / Interest* at confidence 1.0, so the review step would never have shown it to the user. Two causes. First, the prompt never said whether money went out or came in, although the statement states it on every row. Second, after the direction was added, the model *still* said Income: testing one variable at a time isolated the single word `auto`. With the note `cab`, the same row was categorized correctly. The model read "auto" as *automatic* (auto-debit, auto-sweep interest), not as an auto-rickshaw.
+
+**Decision.**
+1. The prompt states direction and amount ("Money: OUT of the account, you paid 106.00 INR").
+2. A deterministic invariant, Income ⇔ money in, is checked after *every* automatic tier (rules, cache, model). A contradicting answer becomes Uncategorized with confidence 0, goes to review, and is never cached.
+3. Cache keys include direction, so a refund from SWIGGY doesn't reuse the purchase's "Food & Dining" entry (which the invariant would then reject on every refund).
+4. Regional vocabulary the model gets wrong goes into the locale hint pack, explicitly ("'auto' means an auto-rickshaw ride, never an automatic payment"), with an eval case that pins it.
+
+**Why.** The model's confidence was 1.0 on an answer the data proves impossible. Confidence-routed review (D-4) can't catch an error the model is sure of; only a check from outside the model can (D-2 again, now at the categorization boundary). On the real 6-month statement, the invariant overrode 10 answers and left 0 contradictions.
+
+**Two side lessons.**
+- **Fixing one bug can unmask another.** Parsing UPI notes correctly made 77 payments look like "a person paid with no note", i.e. possible loans, and half were businesses ("ZOMATO LIMITED", "APOLLO PHARMAC"). The old note bug had been hiding a weak person-vs-business check, because a reference number counted as a note. Measuring the fix's impact on real data before shipping it is what caught this.
+- **The note must be what the payer typed.** App boilerplate ("UPI", "Payment for", "Pay via Razorpay") isn't a note, and treating it as one misleads both the model and the loan detector.
+
+**Principle.** *Never make the model infer what you already know, and never trust its confidence over a fact.* Put every known fact in the prompt, and enforce the facts that imply hard constraints in code after the model answers. When a small model fails on one input, isolate the token before rewriting the prompt: the fix is often one line of domain knowledge.
+
+---
+
 ## Reading list mapping (the 2026 AI-engineer's checklist)
 
 If you retain nothing else, the building blocks in dependency order:
@@ -198,7 +218,7 @@ If you retain nothing else, the building blocks in dependency order:
 1. **Canonical data model first** (D-11) — everything else is written against it.
 2. **Deterministic before probabilistic** (D-9) — carve out what needs no model.
 3. **LLM as artifact-compiler where possible** (D-1) + **invariant validation** (D-2) — but measure structure with code and give the model only the language part; invariants double as a search oracle (D-15).
-4. **Cascade with routing signals** (D-3) + **correct cache keys** (D-7).
+4. **Cascade with routing signals** (D-3) + **correct cache keys** (D-7) + **known facts in the prompt, hard constraints checked in code** (D-16).
 5. **Typed model boundaries** (D-6).
 6. **Confidence-routed HITL with write-back learning** (D-4) and honesty about data limits (D-10).
 7. **Model swappability & smallest-sufficient-model** (D-5).
