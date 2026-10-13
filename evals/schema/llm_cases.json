@@ -1,0 +1,6 @@
+[
+  {
+    "fixture": "tests/fixtures/odd_headers.csv",
+    "expected": {"count": 3, "total_debit": "157.50", "total_credit": "2500.00", "currency": "GBP"}
+  }
+]

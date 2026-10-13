@@ -77,10 +77,10 @@ class CategorizationResult(BaseModel):
 class BankProfile(BaseModel):
     """A declarative description of one bank's CSV/XLSX statement layout.
 
-    Inferred once by the Schema Mapping Agent (or entered interactively),
-    validated deterministically, cached by header fingerprint, and executed by
-    plain code on every later statement from the same bank. This is a program
-    the LLM wrote — the LLM never sees individual rows of a known format.
+    Worked out once per bank (detected from the file, or from LLM header
+    labels, or mapped interactively), validated deterministically, cached by
+    header fingerprint, and executed by plain code on every later statement
+    from the same bank — no LLM sees the rows of a known format.
     """
 
     bank_name: str = ""

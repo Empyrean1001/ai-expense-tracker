@@ -3,9 +3,11 @@ transactions out.
 
 Standard formats go straight to their deterministic parser. CSV/XLSX go
 through the BankProfile machinery: cached profile if we've seen this bank
-before (zero LLM calls), otherwise infer → validate → ask the user anything
-the data can't prove → cache. `model_factory` is lazy so a known-bank run
-never even constructs an LLM client.
+before; otherwise detect the layout from the file itself, then (only if that
+fails) let the LLM label the header cells, then (only if that fails) map
+the columns with the user — validate, ask anything the data can't prove,
+cache. `model_factory` is lazy, so a run that never needs the LLM never even
+constructs a client.
 """
 
 import csv
@@ -15,8 +17,10 @@ from typing import Callable
 import click
 
 from src.format_detector import detect_format
+from src.layout_detect import detect_profile
 from src.localeparse import disambiguate_date_order
 from src.models import BankProfile, Transaction
+from src.ollama_client import OllamaError
 from src.profile import find_header_row, parse_rows_with_profile
 from src.profile_store import match_profile, save_profile
 from src.profile_validator import validate_profile
@@ -121,19 +125,20 @@ def ingest(
         return parse_rows_with_profile(rows, cached)
 
     echo_fn("New statement format — working out the layout (one-time step)...")
-    sample = rows[:SAMPLE_ROWS]
-    try:
-        profile = infer_profile(sample, model_factory())
-    except SchemaInferenceError as exc:
-        echo_fn(str(exc))
-        profile = interactive_column_mapping(sample, prompt_fn, echo_fn)
+    profile = detect_profile(rows)
+    if profile is None:
+        try:
+            profile = infer_profile(rows, model_factory())
+        except (SchemaInferenceError, OllamaError) as exc:
+            echo_fn(str(exc))
+            profile = interactive_column_mapping(rows, prompt_fn, echo_fn)
 
     profile = _resolve_ambiguities(rows, profile, prompt_fn, default_currency)
 
     errors = validate_profile(rows, profile)
     if errors:
         echo_fn("The mapped layout still fails validation:\n  " + "\n  ".join(errors))
-        profile = interactive_column_mapping(sample, prompt_fn, echo_fn)
+        profile = interactive_column_mapping(rows, prompt_fn, echo_fn)
         profile = _resolve_ambiguities(rows, profile, prompt_fn, default_currency)
         errors = validate_profile(rows, profile)
         if errors:

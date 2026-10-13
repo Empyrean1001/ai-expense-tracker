@@ -6,7 +6,7 @@ Once a month, drop in your statement. The tool works out the file layout, catego
 
 ## Features
 
-- **Works with any bank.** Standard formats (OFX/QFX, QIF, MT940, CAMT.053) are read directly. For a CSV or XLSX layout it hasn't seen before, the tool works out the column mapping once, checks it against the running balance, and saves it, so the same bank's statements parse instantly from then on.
+- **Works with any bank.** Standard formats (OFX/QFX, QIF, MT940, CAMT.053) are read directly. For a CSV or XLSX layout it hasn't seen before, the tool works out the columns from the file itself (header names, the cell contents, and a check against the running balance) and saves the layout, so the same bank's statements parse instantly from then on. The local model is only asked for help when the column names are unfamiliar.
 - **Handles local number and date formats.** It reads `1,33,116.37`, `1,234.56` and `1.234,56` correctly, tells day-first dates from month-first ones, and tracks the currency of every account. All money is handled as exact decimals.
 - **Gets smarter each month.** Categories come from your own rules first, then from vendors it has already seen, then from the local model, and finally from you. Every correction you make is remembered.
 - **Never guesses silently.** Low-confidence categories and possible loans to friends are shown to you for confirmation. Whether a payment was a loan is always your decision.
@@ -47,7 +47,7 @@ Options:
 - `--locale in|us|de` picks the regional hint pack used for categorization.
 - `--currency EUR` sets the currency for formats that don't include one, such as QIF.
 
-The first time you use a statement from a new bank, the tool learns its layout. If it can't work the layout out with confidence, it walks you through mapping the columns yourself. Either way, it never imports amounts it might have read wrong.
+The first time you use a statement from a new bank, the tool learns its layout. If it can't work the layout out with confidence, it walks you through mapping the columns yourself, with its best guesses filled in so you can mostly press Enter. Dates can be described in plain terms like `dd-mm-yyyy hh:mm:ss`. Either way, it never imports amounts it might have read wrong.
 
 Running the same file twice is safe: transactions that were already imported are skipped.
 
@@ -93,7 +93,9 @@ These are plain text files, so you can open and edit them by hand. The Excel wor
 statement file
   → detect the format
   → standard format? parse it directly
-  → CSV/XLSX? use the saved bank profile, or learn a new one (checked against the running balance)
+  → CSV/XLSX? use the saved bank profile, or learn a new one: from the file itself,
+    else with the local model labelling the headers, else with you (always checked
+    against the running balance)
   → categorize: your rules → vendor cache → local model → your review
   → append to the transaction history and ledger
   → build the Excel dashboard

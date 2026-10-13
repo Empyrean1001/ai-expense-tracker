@@ -98,9 +98,9 @@ def process(statement: Path, locale_code: str | None, currency: str | None):
     default_currency = (currency or config["defaults"]["currency"]).upper()
     threshold = config["review"]["confidence_threshold"]
 
-    from src.models import BankProfile
+    from src.schema_agent import HeaderLabels
 
-    schema_model_factory = _make_model_factory(config, schema=BankProfile)
+    schema_model_factory = _make_model_factory(config, schema=HeaderLabels)
     categorization_model_factory = _make_model_factory(config, schema=CategorizationResult)
 
     vendor_cache = load_vendor_cache(paths.vendor_cache)

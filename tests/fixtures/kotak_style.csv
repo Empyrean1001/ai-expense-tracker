@@ -11,5 +11,8 @@
 "2","15-07-2026 08:02:11","15-07-2026","UPI/BMTC BUS KA01F2/700000000103/bus","UPI-609008239797","25.00","DR","1,33,091.37","CR"
 "3","16-07-2026 10:00:00","16-07-2026","NEFT SALARY ACME CORP","NEFT-1234","1,500.00","CR","1,34,591.37","CR"
 "4","17-07-2026 20:15:00","17-07-2026","UPI/SWIGGY/645700000001/dinner","UPI-609008239800","249.00","DR","1,34,342.37","CR"
-"Closing Balance","","","","","","","1,34,342.37","CR"
-"Statement notes: this is a synthetic fixture."
+"Closing Balance","as on 31/07/2026 INR 1,34,342.37"
+
+"Important Note:"
+"The transaction date refers to the date & time when the transactions have been posted in the system."
+"This is a synthetic fixture."

@@ -1,157 +1,278 @@
-"""The Schema Mapping Agent: turn an unknown CSV/XLSX layout into a
-BankProfile.
+"""Fallbacks for statement layouts that deterministic detection
+(layout_detect.py) can't read with confidence.
 
-The LLM is used at design time, once per bank format (decision D-1). Its
-output is validated deterministically before being trusted (D-2); after two
-failed attempts the human maps the columns interactively — a wrong import is
-never the fallback.
+1. The LLM labels the header cells — a language task small local models are
+   good at. It is never asked to read the cell grid or transcribe header
+   text: a 7B model does that badly (it invents header names), so code finds
+   the header row, copies its text, and builds and validates the profile
+   from the model's labels (decision D-15).
+2. The human maps the columns interactively: pre-filled with everything that
+   was detected, every answer checked against the file as it's given, and
+   no question that needs strptime syntax to answer.
 """
 
+import re
+from datetime import datetime
+from typing import Literal
+
+import click
+from pydantic import BaseModel
+
+from src.layout_detect import (
+    build_profiles,
+    detect_currency,
+    detect_date_formats,
+    detect_decimal_separator,
+    find_header_row_index,
+    label_headers_by_name,
+    pick_debit_marker,
+    table_rows,
+)
+from src.localeparse import human_date_pattern_to_strptime
 from src.models import BankProfile
 from src.profile_validator import validate_profile
 
-CANONICAL_FIELDS = """\
-posted_at      - date (or datetime) the transaction was made/posted
-value_date     - value date, if a separate column exists
-description    - the transaction narrative/purpose text
-reference      - cheque/reference number column, if any
-amount         - the single amount column (dual_drcr and signed conventions)
-dr_cr          - the debit/credit marker column (dual_drcr convention only)
-debit_amount   - debit amount column (separate convention only)
-credit_amount  - credit amount column (separate convention only)
-balance        - running balance column, if any"""
+ColumnLabel = Literal[
+    "posted_at", "value_date", "description", "reference", "amount", "dr_cr",
+    "debit_amount", "credit_amount", "balance", "other",
+]
+
+LABEL_GUIDE = """\
+posted_at      - the transaction / booking / posting date
+value_date     - the value date, if there is a separate one
+description    - the narration / purpose / payee text
+reference      - a cheque, reference or transaction-id number
+amount         - a single amount column (signed, or paired with a dr_cr column)
+dr_cr          - a column marking each amount as debit or credit (e.g. DR/CR)
+debit_amount   - money-out column, when debits and credits have separate columns
+credit_amount  - money-in column, when debits and credits have separate columns
+balance        - the running balance after each transaction
+other          - anything else (serial numbers, a second marker column, ...)"""
+
+
+class HeaderLabels(BaseModel):
+    """What the model returns: one label per column, in column order."""
+
+    labels: list[ColumnLabel]
 
 
 class SchemaInferenceError(Exception):
     pass
 
 
-def _render_rows(sample_rows: list[list[str]]) -> str:
-    lines = []
-    for i, row in enumerate(sample_rows):
-        cells = " | ".join(f"[{j}] {cell}" for j, cell in enumerate(row))
-        lines.append(f"row {i}: {cells}")
-    return "\n".join(lines)
-
-
-def build_inference_prompt(sample_rows: list[list[str]], feedback: str = "") -> str:
+def build_label_prompt(header: list[str], data: list[list[str]], feedback: str = "") -> str:
+    columns = []
+    for i, name in enumerate(header):
+        examples = [r[i].strip() for r in data[:3] if i < len(r) and r[i].strip()]
+        shown = ", ".join(f'"{e[:40]}"' for e in examples) or "(empty)"
+        columns.append(f'[{i}] "{name}"  e.g. {shown}')
     prompt = (
-        "You are mapping the layout of a bank statement export to a canonical schema.\n"
-        "Below are the first rows of the file, with 0-based column indices in brackets.\n"
-        "Identify the transaction table's header row and produce a BankProfile:\n"
-        "- header_signature: the exact cell texts of the header row, in order\n"
-        "- footer_sentinels: first-cell texts of rows that end the table "
-        "(e.g. 'Closing Balance'), if visible\n"
-        "- column_map: canonical field name -> 0-based column index, using only:\n"
-        f"{CANONICAL_FIELDS}\n"
-        "- date_formats: Python strptime format(s) for the date columns\n"
-        "- decimal_separator: '.' or ',' as used in amounts\n"
-        "- amount_convention: 'dual_drcr' (amount + DR/CR marker column), "
-        "'signed' (one signed amount column), or 'separate' (debit and credit columns)\n"
-        "- debit_marker: the marker text meaning debit, if dual_drcr\n"
-        "- currency: the ISO 4217 code if visible in the file metadata, else ''\n"
-        "- description_convention: 'upi' if descriptions look like "
-        "'UPI/<NAME>/<ref>/<note>', else 'generic'\n"
+        "Label each column of this bank statement table by what it contains.\n"
+        f"Allowed labels:\n{LABEL_GUIDE}\n\n"
+        f"Return exactly {len(header)} labels, one per column, in order.\n"
     )
     if feedback:
-        prompt += (
-            "\nYour previous attempt failed validation with these errors — fix them:\n"
-            f"{feedback}\n"
-        )
-    return prompt + f"\nFile sample:\n{_render_rows(sample_rows)}\n"
+        prompt += f"\nYour previous labels were rejected: {feedback}\nFix them.\n"
+    return prompt + "\nColumns:\n" + "\n".join(columns) + "\n"
 
 
-def infer_profile(sample_rows: list[list[str]], model, max_attempts: int = 2) -> BankProfile:
-    """`model.invoke(prompt) -> BankProfile` (structured output). Each failed
-    validation feeds its errors back into the retry prompt."""
+def _labels_to_column_map(labels: list[str]) -> dict[str, int]:
+    column_map: dict[str, int] = {}
+    for index, label in enumerate(labels):
+        if label != "other" and label not in column_map:
+            column_map[label] = index
+    return column_map
+
+
+def infer_profile(rows: list[list[str]], model, max_attempts: int = 2) -> BankProfile:
+    """`model.invoke(prompt) -> HeaderLabels`. Each rejected attempt feeds
+    the reason back into the retry prompt."""
+    header_index = find_header_row_index(rows)
+    if header_index is None:
+        raise SchemaInferenceError("Could not find a transaction table in this file.")
+    header = rows[header_index]
+    data = table_rows(rows, header_index)
+    currency = detect_currency(rows, header_index)
+
     feedback = ""
-    last_errors: list[str] = []
     for _ in range(max_attempts):
         try:
-            profile = model.invoke(build_inference_prompt(sample_rows, feedback))
+            result = model.invoke(build_label_prompt(header, data, feedback))
         except Exception as exc:
-            last_errors = [f"model call failed: {exc}"]
-            feedback = last_errors[0]
+            feedback = f"the response could not be read ({str(exc)[:200]})"
             continue
-        if profile is None:
-            last_errors = ["model returned nothing"]
-            feedback = last_errors[0]
+        if result is None or len(result.labels) != len(header):
+            got = 0 if result is None else len(result.labels)
+            feedback = f"expected {len(header)} labels, got {got}"
             continue
-        candidate = profile.model_copy(update={"currency": profile.currency or "XXX"})
-        errors = validate_profile(sample_rows, candidate)
-        if not errors:
-            return profile
-        last_errors = errors
-        feedback = "\n".join(errors)
+
+        column_map = _labels_to_column_map(result.labels)
+        candidates = build_profiles(rows, header_index, column_map, currency)
+        if not candidates:
+            feedback = (
+                f"labels {result.labels} don't fit the data — date columns must "
+                "hold dates, money columns numbers, and there must be a description "
+                "and either amount (+ optional dr_cr) or debit_amount + credit_amount"
+            )
+            continue
+        errors: list[str] = []
+        for candidate in candidates:
+            errors = validate_profile(
+                rows, candidate.model_copy(update={"currency": candidate.currency or "XXX"})
+            )
+            if not errors:
+                return candidate
+        feedback = "; ".join(errors)
+
     raise SchemaInferenceError(
-        "Could not infer a valid layout for this file:\n  " + "\n  ".join(last_errors)
+        f"Could not work out this file's columns automatically ({feedback})."
     )
+
+
+def _ask_index(prompt_fn, echo_fn, question: str, width: int, default: int | None, optional: bool):
+    """Ask for a column index; re-ask until it's a valid one (or blank, when
+    optional)."""
+    while True:
+        suffix = " (blank if none)" if optional else ""
+        kwargs = {"default": "" if default is None else str(default), "show_default": default is not None}
+        answer = str(prompt_fn(f"{question}{suffix}", **kwargs)).strip()
+        if not answer and optional:
+            return None
+        if answer.isdigit() and int(answer) < width:
+            return int(answer)
+        echo_fn(f"  Please enter a column number between 0 and {width - 1}.")
 
 
 def interactive_column_mapping(rows: list[list[str]], prompt_fn, echo_fn) -> BankProfile:
-    """Manual fallback: the user maps columns from a preview. Slower than the
-    LLM, but always correct — and only ever needed once per bank."""
-    echo_fn("\nAutomatic layout detection failed. Let's map the columns together.")
-    echo_fn("File preview (row number: [column index] cell):\n")
-    for i, row in enumerate(rows[:15]):
-        echo_fn(f"  row {i}: " + " | ".join(f"[{j}] {cell}" for j, cell in enumerate(row)))
+    """Manual fallback, only ever needed once per bank."""
+    echo_fn("\nI couldn't work out this file's columns automatically — "
+            "let's map them together (only needed once per bank).")
 
-    header_index = int(prompt_fn("Which row number is the table header?"))
+    header_index = find_header_row_index(rows)
+    if header_index is not None:
+        echo_fn(f"\nThe table header looks like row {header_index}:")
+        echo_fn("  " + " | ".join(rows[header_index]))
+        confirmed = str(prompt_fn("Is that the header row? [y/n]",
+                                  type=click.Choice(["y", "n"]), default="y")).strip().lower()
+        if confirmed != "y":
+            header_index = None
+    if header_index is None:
+        echo_fn("\nFile preview (row number: cells):")
+        for i, row in enumerate(rows[:25]):
+            echo_fn(f"  row {i}: " + " | ".join(row))
+        while True:
+            answer = str(prompt_fn("Which row number is the table header?")).strip()
+            if answer.isdigit() and int(answer) < len(rows) and table_rows(rows, int(answer)):
+                header_index = int(answer)
+                break
+            echo_fn("  That row isn't followed by any table rows — try again.")
+
     header = rows[header_index]
+    data = table_rows(rows, header_index)
+    width = len(header)
+    guess = label_headers_by_name(header)
 
-    def ask_column(question: str, optional: bool = False) -> int | None:
-        answer = str(prompt_fn(question + (" (blank if none)" if optional else ""))).strip()
-        return int(answer) if answer else None
+    echo_fn("\nColumns:")
+    for j, name in enumerate(header):
+        example = data[0][j] if data and j < len(data[0]) else ""
+        echo_fn(f"  [{j}] {name or '(no name)'}   e.g. {example}")
+
+    def column(field: str, question: str, optional: bool = False) -> int | None:
+        return _ask_index(prompt_fn, echo_fn, question, width, guess.get(field), optional)
 
     column_map: dict[str, int] = {}
-    date_col = ask_column("Column index of the transaction date?")
-    column_map["posted_at"] = date_col
-    value_col = ask_column("Column index of the value date?", optional=True)
-    if value_col is not None:
-        column_map["value_date"] = value_col
-    column_map["description"] = ask_column("Column index of the description?")
-    ref_col = ask_column("Column index of the reference number?", optional=True)
-    if ref_col is not None:
-        column_map["reference"] = ref_col
+    column_map["posted_at"] = column("posted_at", "Column number of the transaction date?")
+    value_date = column("value_date", "Column number of the value date?", optional=True)
+    if value_date is not None:
+        column_map["value_date"] = value_date
+    column_map["description"] = column("description", "Column number of the description?")
+    reference = column("reference", "Column number of the reference number?", optional=True)
+    if reference is not None:
+        column_map["reference"] = reference
 
-    convention = str(prompt_fn(
-        "Amount style: [1] one amount + DR/CR column, [2] one signed amount, "
-        "[3] separate debit and credit columns"
+    default_style = ("1" if "dr_cr" in guess else "3" if "debit_amount" in guess else "2")
+    style = str(prompt_fn(
+        "How are amounts shown? [1] one amount column + a DR/CR column, "
+        "[2] one signed amount column, [3] separate debit and credit columns",
+        type=click.Choice(["1", "2", "3"]), default=default_style,
     )).strip()
-    debit_marker = "DR"
-    if convention == "1":
-        amount_convention = "dual_drcr"
-        column_map["amount"] = ask_column("Column index of the amount?")
-        column_map["dr_cr"] = ask_column("Column index of the DR/CR marker?")
-        debit_marker = str(prompt_fn("Marker text that means debit (e.g. DR)?")).strip() or "DR"
-    elif convention == "2":
-        amount_convention = "signed"
-        column_map["amount"] = ask_column("Column index of the amount?")
+    if style == "1":
+        column_map["amount"] = column("amount", "Column number of the amount?")
+        column_map["dr_cr"] = column("dr_cr", "Column number of the DR/CR marker?")
+    elif style == "2":
+        column_map["amount"] = column("amount", "Column number of the amount?")
     else:
-        amount_convention = "separate"
-        column_map["debit_amount"] = ask_column("Column index of the debit amount?")
-        column_map["credit_amount"] = ask_column("Column index of the credit amount?")
+        column_map["debit_amount"] = column("debit_amount", "Column number of debits (money out)?")
+        column_map["credit_amount"] = column("credit_amount", "Column number of credits (money in)?")
+    balance = column("balance", "Column number of the running balance?", optional=True)
+    if balance is not None:
+        column_map["balance"] = balance
 
-    balance_col = ask_column("Column index of the running balance?", optional=True)
-    if balance_col is not None:
-        column_map["balance"] = balance_col
+    # Date format: detected from the column itself; only asked if that fails,
+    # in plain 'dd-mm-yyyy' terms, and checked against the file.
+    date_formats: list[str] = []
+    for field in ("posted_at", "value_date"):
+        if field not in column_map:
+            continue
+        samples = [r[column_map[field]] for r in data if column_map[field] < len(r)]
+        found = detect_date_formats(samples)
+        while not found:
+            example = next((s for s in samples if s.strip()), "")
+            pattern = str(prompt_fn(
+                f"How are dates written in column {column_map[field]} (e.g. '{example}')? "
+                "Write it like dd-mm-yyyy hh:mm:ss"
+            )).strip()
+            fmt = human_date_pattern_to_strptime(pattern)
+            if _format_fits(samples, fmt):
+                found = [fmt]
+            else:
+                echo_fn(f"  '{pattern}' doesn't match '{example}' — try again.")
+        if found[0] not in date_formats:
+            date_formats.append(found[0])
 
-    date_format = str(prompt_fn(
-        "Date format (strptime, e.g. %d-%m-%Y or %m/%d/%Y or %d.%m.%Y)?"
-    )).strip()
-    decimal_separator = str(prompt_fn("Decimal separator, '.' or ','?")).strip() or "."
-    currency = str(prompt_fn("ISO currency code of this account (e.g. USD, EUR, INR)?")).strip().upper()
-    footer = str(prompt_fn(
-        "Text in the first cell of the row that ends the table (blank if none)?"
-    )).strip()
+    money = [r[c] for f in ("amount", "debit_amount", "credit_amount", "balance")
+             if f in column_map for r in data
+             for c in [column_map[f]] if c < len(r) and r[c].strip()]
+    debit_marker = "DR"
+    if style == "1":
+        markers = sorted({r[column_map["dr_cr"]].strip() for r in data
+                          if column_map["dr_cr"] < len(r) and r[column_map["dr_cr"]].strip()})
+        debit_marker = pick_debit_marker(markers)
+        if markers and debit_marker not in markers:
+            debit_marker = str(prompt_fn(
+                f"Which of these means money out? {', '.join(markers)}",
+                type=click.Choice(markers),
+            )).strip()
+
+    currency = detect_currency(rows, header_index)
+    while not re.fullmatch(r"[A-Z]{3}", currency):
+        currency = str(prompt_fn(
+            "Which currency is this account in? (3-letter code, e.g. INR, USD, EUR)"
+        )).strip().upper()
+
+    descriptions = [r[column_map["description"]] for r in data if column_map["description"] < len(r)]
+    upi_share = sum(d.startswith("UPI/") for d in descriptions) / max(len(descriptions), 1)
 
     return BankProfile(
         header_signature=header,
-        footer_sentinels=[footer] if footer else [],
         column_map=column_map,
-        date_formats=[date_format, date_format.split(" ")[0]] if " " in date_format else [date_format],
-        decimal_separator=decimal_separator,
-        amount_convention=amount_convention,
+        date_formats=date_formats,
+        decimal_separator=detect_decimal_separator(money),
+        amount_convention={"1": "dual_drcr", "2": "signed", "3": "separate"}[style],
         debit_marker=debit_marker,
         currency=currency,
+        description_convention="upi" if upi_share >= 0.1 else "generic",
     )
+
+
+def _format_fits(samples: list[str], fmt: str) -> bool:
+    """Does one specific format parse every non-blank sample?"""
+    values = [s.strip() for s in samples if s and s.strip()]
+    if not values:
+        return False
+    try:
+        for value in values:
+            datetime.strptime(value, fmt)
+    except ValueError:
+        return False
+    return True

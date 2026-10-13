@@ -8,6 +8,8 @@ Format per decision: **Context → Options → Decision → Why → Principle**.
 
 ## D-1: Use the LLM at *design time* (schema inference), not *run time* (row parsing)
 
+> Revised by **D-15**: the "compile once, execute deterministically" idea stands, but the LLM no longer writes the whole profile — code measures the layout and the model only labels header text when code can't.
+
 **Context.** Every bank invents its own CSV/XLSX layout. The naive AI approach is "throw each statement at the LLM and let it extract transactions."
 
 **Options.**
@@ -172,13 +174,30 @@ Three non-AI decisions that shape the AI system:
 
 ---
 
+## D-15: Measure structure with code; give the model only the language part *(revises D-1)*
+
+**Context.** D-1 had the LLM read the first ~40 raw rows of an unknown CSV and emit a whole `BankProfile`: find the header row, copy its text, map columns, pick the date format and decimal separator. On real 595-row bank exports, the 7B local model failed every time. It invented header names ("S.No", "Timestamp" for "Sl. No.", "Transaction Date") and used them as column-map keys, so its output didn't even fit the schema. A fixed-field schema fixed the *shape* (Ollama constrains decoding to the JSON schema, so every response parsed), but not the *content*: same input, same wrong answer (header row 1 instead of 13, wrong amount convention, missing date and balance columns). The manual fallback failed too, and in a worse way. It asked the user for strptime syntax (they typed `hh:mm:ss`), a decimal separator (they guessed wrong), and "the text that ends the table". They typed the last serial number, which **silently dropped the last transaction while still passing validation**.
+
+**Options.**
+1. Better prompts / a bigger model for whole-profile inference.
+2. A fixed-field schema (indices only) for the same grid-reading task.
+3. Measure everything measurable with code: header row (the row before the first run of date-and-number rows), column roles (header synonyms, else cell contents), date format (try candidates against real cells), decimal separator (count `.dd` vs `,dd` endings). Settle any remaining ambiguity (which numeric column is amount vs balance; which of two `Dr / Cr` columns matters) by *generating candidate profiles and keeping the one that passes balance continuity*. Use the LLM only as a fallback, and only for what it's good at: **labelling header text** ("Out" → `debit_amount`). Code still builds and validates the profile.
+
+**Decision.** Option 3. Option 2 was tested live and failed (the evidence is above); option 1 is the same mistake, just more expensive.
+
+**Why.** Reading a 2-D grid of cells is spatial and counting work, which small models are weak at; deciding that "Wertstellung" means value date is language work, which they're good at. Moving each sub-task to the cheapest mechanism that does it reliably made a normal bank statement need **zero** LLM calls (60 ms, fully deterministic). The balance-continuity invariant from D-2 got promoted from a *gate* to a *search oracle*: instead of asking "is this one guess right?", code generates every plausible combination and the invariant picks the right one. The interactive fallback got the same treatment. It's pre-filled from detection, every answer is checked against the file as it's given, date patterns are accepted in plain `dd-mm-yyyy` form, and questions code can answer (decimal separator, table end) are no longer asked.
+
+**Principle.** *Use the model for the part of the problem that is actually language.* Before giving an LLM a task, split it into what can be measured from the data, what can be verified by an invariant, and what genuinely needs semantics; then give the model only the last part. A corollary for human-in-the-loop design: **every question you ask a person is an input surface that needs validation**, and the best question is one you didn't need to ask. A plausible-but-wrong human answer that passes validation is worse than an LLM error, because no one suspects it.
+
+---
+
 ## Reading list mapping (the 2026 AI-engineer's checklist)
 
 If you retain nothing else, the building blocks in dependency order:
 
 1. **Canonical data model first** (D-11) — everything else is written against it.
 2. **Deterministic before probabilistic** (D-9) — carve out what needs no model.
-3. **LLM as artifact-compiler where possible** (D-1) + **invariant validation** (D-2).
+3. **LLM as artifact-compiler where possible** (D-1) + **invariant validation** (D-2) — but measure structure with code and give the model only the language part; invariants double as a search oracle (D-15).
 4. **Cascade with routing signals** (D-3) + **correct cache keys** (D-7).
 5. **Typed model boundaries** (D-6).
 6. **Confidence-routed HITL with write-back learning** (D-4) and honesty about data limits (D-10).

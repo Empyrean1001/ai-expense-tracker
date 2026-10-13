@@ -66,6 +66,34 @@ def parse_datetime_multi(raw: str, formats: list[str]) -> datetime:
     raise LocaleParseError(f"could not read date {raw!r} with any of {formats}")
 
 
+def human_date_pattern_to_strptime(pattern: str) -> str:
+    """Translate how people write date patterns into strptime syntax.
+
+    'dd-mm-yyyy hh:mm:ss' -> '%d-%m-%Y %H:%M:%S'. Nobody should have to know
+    strptime to use this tool, and a half-strptime answer like
+    '%d-%m-%Y hh:mm:ss' is translated too. 'mm' means minutes when it follows
+    an hour, months otherwise.
+    """
+    text = pattern.strip()
+    twelve_hour = bool(re.search(r"\b(am|pm|tt)\b|am/pm", text, re.IGNORECASE))
+    text = re.sub(r"\s*(am/pm|am|pm|tt)\b", " %p", text, flags=re.IGNORECASE)
+
+    replacements = [
+        (r"(?i)yyyy", "%Y"),
+        (r"(?i)(?<!%)yy", "%y"),
+        (r"(?i)mmmm", "%B"),
+        (r"(?i)mmm|mon", "%b"),
+        (r"(?i)(?<!%)dd", "%d"),
+        (r"(?i)(?<!%)hh", "%I" if twelve_hour else "%H"),
+        (r"(?i)(?<=%[HI]:)mm", "%M"),
+        (r"(?i)(?<!%)mm", "%m"),
+        (r"(?i)(?<!%)ss", "%S"),
+    ]
+    for regex, directive in replacements:
+        text = re.sub(regex, directive, text)
+    return text
+
+
 def disambiguate_date_order(
     raws: list[str],
 ) -> Literal["day_first", "month_first", "ambiguous"]:

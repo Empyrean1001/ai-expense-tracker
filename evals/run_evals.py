@@ -4,9 +4,10 @@
     python -m evals.run_evals
 
 Deterministic checks always run (committed profiles must reproduce expected
-parses; the validator must reject corrupted profiles). LLM checks (schema
-inference, categorization accuracy + calibration) run only when Ollama is
-reachable, otherwise they are reported SKIPPED. Exit code is non-zero on
+parses; layout detection must find those same parses with no LLM; the
+validator must reject corrupted profiles). LLM checks (header labelling for
+a layout code can't read, categorization accuracy + calibration) run only
+when Ollama is reachable, otherwise they are reported SKIPPED. Exit code is non-zero on
 any regression.
 """
 
@@ -28,7 +29,8 @@ from src.ollama_client import (  # noqa: E402
 )
 from src.profile import parse_rows_with_profile  # noqa: E402
 from src.profile_validator import validate_profile  # noqa: E402
-from src.schema_agent import SchemaInferenceError, infer_profile  # noqa: E402
+from src.layout_detect import detect_profile  # noqa: E402
+from src.schema_agent import HeaderLabels, SchemaInferenceError, infer_profile  # noqa: E402
 
 CONFIDENCE_THRESHOLD = 0.6
 
@@ -42,6 +44,18 @@ def load_cases() -> list[dict]:
     return json.loads((PROJECT / "evals/schema/cases.json").read_text())
 
 
+def _summarize(rows, profile, currency: str) -> dict:
+    txns = parse_rows_with_profile(rows, profile.model_copy(update={"currency": currency}))
+    total_debit = sum((t.amount for t in txns if t.direction == "debit"), Decimal(0))
+    total_credit = sum((t.amount for t in txns if t.direction == "credit"), Decimal(0))
+    return {
+        "count": len(txns),
+        "total_debit": str(total_debit),
+        "total_credit": str(total_credit),
+        "currency": txns[0].currency,
+    }
+
+
 def eval_profile_execution() -> list[str]:
     """Committed known-good profiles must reproduce the expected parses."""
     failures = []
@@ -50,20 +64,27 @@ def eval_profile_execution() -> list[str]:
         profile = BankProfile(**json.loads((PROJECT / case["profile"]).read_text()))
         expected = case["expected"]
         try:
-            txns = parse_rows_with_profile(rows, profile)
+            got = _summarize(rows, profile, profile.currency)
         except Exception as exc:
             failures.append(f"{case['fixture']}: parse failed: {exc}")
             continue
-        total_debit = sum((t.amount for t in txns if t.direction == "debit"), Decimal(0))
-        total_credit = sum((t.amount for t in txns if t.direction == "credit"), Decimal(0))
-        got = {
-            "count": len(txns),
-            "total_debit": str(total_debit),
-            "total_credit": str(total_credit),
-            "currency": txns[0].currency,
-        }
         if got != expected:
             failures.append(f"{case['fixture']}: expected {expected}, got {got}")
+    return failures
+
+
+def eval_layout_detection() -> list[str]:
+    """Detection with no LLM must reach the same parse as the golden profile."""
+    failures = []
+    for case in load_cases():
+        rows = read_rows(PROJECT / case["fixture"])
+        profile = detect_profile(rows)
+        if profile is None:
+            failures.append(f"{case['fixture']}: layout not detected")
+            continue
+        got = _summarize(rows, profile, case["expected"]["currency"])
+        if got != case["expected"]:
+            failures.append(f"{case['fixture']}: expected {case['expected']}, got {got}")
     return failures
 
 
@@ -96,20 +117,21 @@ def get_live_model(schema):
     return ChatOllama(base_url=host, model=model_name, temperature=0).with_structured_output(schema)
 
 
-def eval_schema_inference() -> list[str]:
-    model = get_live_model(BankProfile)
+def eval_header_labelling() -> list[str]:
+    """For layouts code can't read, the LLM labels header cells; the result
+    must parse to the expected totals."""
+    model = get_live_model(HeaderLabels)
     failures = []
-    for case in load_cases():
-        rows = read_rows(PROJECT / case["fixture"])[:40]
+    for case in json.loads((PROJECT / "evals/schema/llm_cases.json").read_text()):
+        rows = read_rows(PROJECT / case["fixture"])
         try:
             profile = infer_profile(rows, model)
         except SchemaInferenceError as exc:
-            failures.append(f"{case['fixture']}: inference failed: {exc}")
+            failures.append(f"{case['fixture']}: {exc}")
             continue
-        candidate = profile.model_copy(update={"currency": profile.currency or "XXX"})
-        errors = validate_profile(read_rows(PROJECT / case["fixture"]), candidate)
-        if errors:
-            failures.append(f"{case['fixture']}: inferred profile invalid: {errors}")
+        got = _summarize(rows, profile, case["expected"]["currency"])
+        if got != case["expected"]:
+            failures.append(f"{case['fixture']}: expected {case['expected']}, got {got}")
     return failures
 
 
@@ -167,6 +189,7 @@ def main() -> int:
             print(f"[PASS] {name}" + (f" — {extra}" if extra else ""))
 
     report("profile execution matches goldens", eval_profile_execution())
+    report("layout detection without LLM matches goldens", eval_layout_detection())
     report("validator rejects corrupted profiles", eval_validator_rejects_corruption())
 
     try:
@@ -178,11 +201,11 @@ def main() -> int:
     except OllamaError as exc:
         ollama_up = False
         reason = str(exc).splitlines()[0]
-        print(f"[SKIP] schema inference (LLM) — {reason}")
+        print(f"[SKIP] header labelling (LLM) — {reason}")
         print(f"[SKIP] categorization accuracy+calibration (LLM) — {reason}")
 
     if ollama_up:
-        report("schema inference (LLM)", eval_schema_inference())
+        report("header labelling (LLM)", eval_header_labelling())
         failures, summary = eval_categorization()
         report("categorization accuracy+calibration (LLM)", failures, summary)
 

@@ -41,7 +41,9 @@ statement file (csv/xlsx/ofx/qif/camt/mt940)
 │ 2a. Standard formats → deterministic parser (no LLM)       │
 │ 2b. CSV/XLSX → fingerprint → BankProfile cache hit?        │
 │       hit  → deterministic parse using cached profile      │
-│       miss → Schema Mapping Agent (LLM, once per format)   │
+│       miss → layout detection (code, no LLM)               │
+│              → else LLM labels header text                 │
+│              → else user maps columns (pre-filled)         │
 │              → profile validation (round-trip + balance    │
 │                continuity) → cache profile → parse         │
 └────────────────────────────────────────────────────────────┘
@@ -71,25 +73,28 @@ Decides which ingestion path a file takes. Extension first, then content sniffin
 
 OFX/QFX, QIF, CAMT.053 (ISO 20022), and MT940 are *specifications* — banks that export them follow documented field semantics. Each gets a small deterministic parser straight to canonical `Transaction` records. The LLM is never used where a standard already answers the question.
 
-### 3. Schema Mapping Agent (LLM, design-time only)
+### 3. Layout detection → LLM header labelling → interactive mapping
 
-For CSV/XLSX files — the formats where every bank invents its own layout — the LLM is used **once per bank format**, not once per row:
+For CSV/XLSX files, where every bank invents its own layout, a declarative **`BankProfile`** is produced **once per bank format**:
 
-- Input: the first ~40 raw rows of the file (enough to show metadata block, header row, sample transactions) plus the canonical field list.
-- Output (structured, Pydantic-validated): a declarative **`BankProfile`**:
-  - header row locator (matched cell signature) and footer sentinel
-  - column mapping → canonical fields (date, description, amount(s), balance, reference)
-  - date format string(s); timestamp presence
-  - number locale (decimal separator, grouping style)
-  - debit/credit representation: dual Dr/Cr columns, signed amounts, or separate debit/credit columns
-  - currency (from metadata block if present, else asked of the user once)
-- The profile is a *program the LLM wrote*, executed deterministically by the row parser. The LLM never sees individual transactions during a normal monthly run of a known bank.
+- header row signature (copied from the file, never generated), column mapping to canonical fields (date, value date, description, reference, amount(s), DR/CR marker, balance)
+- date format(s), number locale (decimal separator)
+- debit/credit representation: dual Dr/Cr columns, signed amounts, or separate debit/credit columns
+- currency (from a `Currency` cell or an `Amount (GBP)`-style header if present, else asked of the user once)
+
+It is produced by the first of three stages that succeeds (revised in decision D-15; originally the LLM wrote the whole profile, which a 7B model could not do reliably on real exports):
+
+1. **Layout detection (`src/layout_detect.py`, no LLM).** The header row is the row right before the first run of date-and-number rows of the same width. The table ends at the first non-blank row of a different width (no footer sentinel needed). Column roles come from header synonyms (English, German, Spanish, French, Portuguese), else from cell contents. Date formats and the decimal separator are found by trying candidates against real cells. Remaining ambiguity (amount vs balance column, which `Dr / Cr` column) is resolved by generating candidate profiles and keeping the first that passes validation. Content-only candidates must include a balance column, so they can be verified.
+2. **LLM header labelling.** Only when detection fails: the model sees each header cell's text with a few example values and returns one label per column (a constrained enum). Code builds the profile from the labels and validates it; rejection reasons are fed back for one retry.
+3. **Interactive mapping.** The detected header row and column guesses are offered as defaults, every column answer is range-checked, dates are detected from the chosen column (or given in plain `dd-mm-yyyy hh:mm:ss` form and checked against the file), and the decimal separator and table end are never asked. If Ollama is unreachable, stage 2 is skipped rather than aborting the run.
+
+The profile is executed deterministically by the row parser. During a normal monthly run of a known bank, no LLM sees the rows.
 
 **Profile validation (deterministic, before the profile is trusted):**
 - every sample row parses without error under the profile;
 - dates fall in a plausible range and are internally consistent (resolves `DD/MM` vs `MM/DD` ambiguity — if any day value exceeds 12 the order is proven; if not, ask the user once);
 - **balance continuity**: where a running balance column exists, `previous_balance ± amount == balance` must hold across sample rows. This single check catches wrong amount columns, wrong sign conventions, and wrong number-locale guesses simultaneously.
-- On validation failure: one retry with the failure fed back to the LLM, then fall back to an interactive column-mapping prompt (the user picks columns from a preview). Never silently import misparsed money.
+- Validation runs against the whole file, not a sample. On failure, the next stage runs; after the interactive stage, a still-invalid mapping aborts the import. Never silently import misparsed money.
 
 **Profile cache:** `profiles/<fingerprint>.json`, keyed by a fingerprint of the normalized header signature. Next month's statement from the same bank is a cache hit — zero LLM calls for parsing. Profiles are human-readable JSON and hand-editable.
 
@@ -150,7 +155,7 @@ Ledger manager, split tracker (LLM-free, on-demand), settle command, insights en
 ## Error handling (v2 additions)
 
 - Unrecognized file format → name the detected content type and the supported list.
-- Schema inference fails validation twice → interactive column mapping, never a bad import.
+- Layout detection and LLM header labelling both fail → interactive column mapping, never a bad import.
 - Ambiguous date order with no disambiguating row → one explicit user question, answer stored in the profile.
 - Mixed/missing currency metadata → asked once, stored in the profile.
 - All v1 error-handling rules stand.
@@ -159,7 +164,8 @@ Ledger manager, split tracker (LLM-free, on-demand), settle command, insights en
 
 - Standard-format parsers: fixture files per format (synthetic).
 - Profile validator: unit tests for balance continuity, locale detection, date-order proof.
-- Schema Mapping Agent: mocked LLM responses (valid, invalid, adversarially wrong) → assert validation catches bad profiles.
+- Layout detection: header/date/decimal/currency detectors, synonym and content-based mapping, balance-verified candidate search.
+- LLM header labelling: mocked responses (valid, wrong count, contradicting the data, wrong marker column) → assert validation catches bad labels and feedback is passed to the retry.
 - Cascade routing: assert tier order and that corrections write back to cache.
 - Everything in the v1 testing section stands.
 - The eval harness (section 8) covers behavioral quality; the test suite covers code correctness. Both must pass.
@@ -168,6 +174,6 @@ Ledger manager, split tracker (LLM-free, on-demand), settle command, insights en
 
 - **Bank API / open-banking integrations** (Plaid, GoCardless, Account Aggregator): manual statement upload remains the input. Rationale in decisions doc (D-13).
 - **FX conversion / consolidated multi-currency totals**: report per currency instead.
-- **PDF statement ingestion**: deferred; the profile architecture accommodates it later (table extraction feeding the same Schema Mapping Agent), but table-from-PDF quality is its own project.
+- **PDF statement ingestion**: deferred; the profile architecture accommodates it later (table extraction feeding the same layout detection), but table-from-PDF quality is its own project.
 - **Cloud LLM tier**: the architecture reserves a config seam for a BYO-key remote model, but v2 ships local-only (D-5).
 - **GUI/web dashboard, database, multi-user**: future output adapters / scaling steps, not now.

@@ -1,7 +1,7 @@
 """Execute a BankProfile against raw statement rows.
 
-A profile is a program the Schema Mapping Agent wrote once; this module is
-its deterministic interpreter. During a normal monthly run of a known bank,
+A profile describes one bank's layout, worked out once; this module is its
+deterministic interpreter. During a normal monthly run of a known bank,
 only this code touches the rows — never the LLM.
 """
 
