@@ -11,6 +11,9 @@ from src.localeparse import parse_amount, parse_datetime_multi
 from src.models import BankProfile, Transaction
 
 _WHITESPACE = re.compile(r"\s+")
+# The time-of-day tail of a strptime format: an optional space or ISO "T"
+# separator, then everything from the first hour directive on.
+_TIME_TAIL = re.compile(r"[ T]?%[HI].*$")
 
 
 class ProfileExecutionError(ValueError):
@@ -31,6 +34,22 @@ def find_header_row(rows: list[list[str]], signature: list[str]) -> int | None:
         if got == want:
             return i
     return None
+
+
+def expand_date_formats(formats: list[str]) -> list[str]:
+    """Add the date-only form of every timestamp format, after the original.
+
+    Banks routinely put a timestamp in one date column ('15-07-2026 07:48:39')
+    and a plain date in another ('15-07-2026'), while a profile — inferred or
+    hand-entered — tends to list only the timestamp format. The date part is
+    the same in both, so the date-only variant is always safe to try.
+    """
+    expanded: list[str] = []
+    for fmt in formats:
+        for candidate in (fmt, _TIME_TAIL.sub("", fmt)):
+            if candidate and candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
 
 
 def _cell(row: list[str], column_map: dict[str, int], key: str) -> str:
@@ -80,12 +99,13 @@ def parse_rows_with_profile(rows: list[list[str]], profile: BankProfile) -> list
 
 def _parse_row(row: list[str], profile: BankProfile, description: str) -> Transaction:
     column_map = profile.column_map
+    date_formats = expand_date_formats(profile.date_formats)
 
     posted_raw = _cell(row, column_map, "posted_at")
     value_raw = _cell(row, column_map, "value_date")
-    posted = parse_datetime_multi(posted_raw or value_raw, profile.date_formats)
+    posted = parse_datetime_multi(posted_raw or value_raw, date_formats)
     value_date = (
-        parse_datetime_multi(value_raw, profile.date_formats).date()
+        parse_datetime_multi(value_raw, date_formats).date()
         if value_raw
         else posted.date()
     )

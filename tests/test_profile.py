@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from src.models import BankProfile
-from src.profile import ProfileExecutionError, find_header_row, parse_rows_with_profile
+from src.profile import (
+    ProfileExecutionError,
+    expand_date_formats,
+    find_header_row,
+    parse_rows_with_profile,
+)
 from src.profile_validator import validate_profile
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -106,6 +111,32 @@ class TestValidatorCatchesBadProfiles:
     def test_missing_header_reported(self):
         with pytest.raises(ProfileExecutionError, match="header"):
             parse_rows_with_profile([["nothing", "here"]], KOTAK_PROFILE)
+
+
+class TestDateOnlyFallback:
+    """Banks often put a timestamp in one date column and a plain date in
+    another; a profile listing only the timestamp format must still read the
+    date-only column."""
+
+    def test_timestamp_format_also_reads_date_only_column(self):
+        profile = KOTAK_PROFILE.model_copy(update={"date_formats": ["%d-%m-%Y %H:%M:%S"]})
+        txns = parse_rows_with_profile(read_rows("kotak_style.csv"), profile)
+        assert txns[0].value_date == date(2026, 7, 15)
+        assert validate_profile(read_rows("kotak_style.csv"), profile) == []
+
+    @pytest.mark.parametrize("fmt,expected", [
+        ("%d-%m-%Y %H:%M:%S", ["%d-%m-%Y %H:%M:%S", "%d-%m-%Y"]),
+        ("%Y-%m-%dT%H:%M:%S", ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]),
+        ("%d %b %Y %I:%M %p", ["%d %b %Y %I:%M %p", "%d %b %Y"]),
+        ("%d.%m.%Y", ["%d.%m.%Y"]),
+    ])
+    def test_expand_date_formats(self, fmt, expected):
+        assert expand_date_formats([fmt]) == expected
+
+    def test_expand_keeps_order_and_dedupes(self):
+        assert expand_date_formats(["%d-%m-%Y %H:%M:%S", "%d-%m-%Y"]) == [
+            "%d-%m-%Y %H:%M:%S", "%d-%m-%Y",
+        ]
 
 
 def test_find_header_row_normalizes_whitespace():
