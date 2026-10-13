@@ -17,7 +17,7 @@ Once a month, drop in your statement. The tool works out the file layout, catego
 ## Requirements
 
 - Python 3.11 or newer
-- [Ollama](https://ollama.com), with a model pulled (the default is `qwen2.5:3b-instruct`, which runs fine on a laptop)
+- [Ollama](https://ollama.com), with a model pulled (the default is `qwen2.5:7b-instruct`, about 4.7 GB; it needs roughly 6 GB of GPU memory to run fast)
 
 ## Setup
 
@@ -26,7 +26,7 @@ git clone https://github.com/Empyrean1001/ai-expense-tracker.git
 cd ai-expense-tracker
 pip install -r requirements.txt
 
-ollama pull qwen2.5:3b-instruct
+ollama pull qwen2.5:7b-instruct
 ollama serve            # if it isn't already running
 
 python track_expenses.py doctor

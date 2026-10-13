@@ -1,6 +1,6 @@
 ollama:
   host: "http://localhost:11434"
-  model: "qwen2.5:3b-instruct"
+  model: "qwen2.5:7b-instruct"
 
 review:
   # Categorizations below this confidence get shown to you for confirmation.
